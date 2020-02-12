@@ -5,6 +5,8 @@
 path=$(dirname `realpath $0`)
 cd ~/ubuntu-bionic
 
+./scripts/config --enable SCSI_FC_ATTRS
+
 all_funcs=/tmp/pfunct.txt
 all_structs=/tmp/pahole.txt
 callers=/tmp/all_callers.txt
@@ -19,7 +21,7 @@ function die  {
 }
 
 function warn  {
-	echo -e "\e[31m$@\e[0m";
+	echo -e "\e[33m$@\e[0m";
 }
 
 function parse_file {
@@ -32,7 +34,20 @@ function parse_file {
 	ofile="$dir/${base}.o"
 
 	if [ ! -e $ofile ]; then
-		warn "Please compile $ofile"
+		warn "Please compile $ofile "
+		base=`basename $ofile`
+		dir=`dirname $ofile`
+		#grep $base $dir/Makefile|grep -oP "obj-\\$\(\w+\)" |grep -oP "\(\w+\)"|grep -Po "\w+"
+		grep $base $dir/Makefile|grep -oP "obj-\\$\(\w+\)" |grep -oP "\(\w+\)"|grep -Po "\w+" > /tmp/conf
+		if [ $? -ne 0 ]; then
+			grep -oP "obj-\\$\(\w+\)" $dir/Makefile|grep -oP "\(\w+\)"|grep -Po "\w+" > /tmp/conf
+		fi
+		for i in `cat /tmp/conf`;
+		do
+			echo "./scripts/config --enable $i"
+			./scripts/config --enable $i
+		done
+
 	else
 		echo "extracting structs from: $ofile"
 		pahole -E $ofile > /tmp/${base}.txt 2>/dev/null

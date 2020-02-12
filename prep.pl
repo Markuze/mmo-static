@@ -6,6 +6,7 @@ use autodie;
 
 use Tie::File;
 use Getopt::Std;
+use Term::ANSIColor;
 
 my %opts = ();
 my $argv = "@ARGV";
@@ -37,7 +38,11 @@ sub get_vars {
 
 	$file[$line] =~ /,*\s*([&\w\->\.]+)\s*\);/;
 	$dir = $1;
+	if ($mapped =~ /&\w+/) {
+		print color("red"), "High Risk..." ;
+	}
 	printf "$mapped to $dir\n";
+	color("reset");
 }
 
 get_vars $line;
