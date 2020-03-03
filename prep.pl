@@ -21,13 +21,14 @@ usage() unless (defined($opts{'f'}) and $opts{'l'} =~ /^\d+$/);
 my @file;
 my $line = $opts{'l'} - 1;
 my $mapped;
+my $cur;
 my $dir;
 tie @file, 'Tie::File', $opts{'f'};
 
 sub get_vars {
 	my $line = shift;
 
-	if ( $file[$line] =~ /\w+\([\w\->&]+,\s*([\w\->\.&]+)/) {
+	if ( $file[$line] =~ /\w+\s*\([\w\->&]+,\s*([\w\->\.&]+)/) {
 		$mapped = $1;
 	} elsif ($file[$line + 1] =~ /^\s+([&\w\->]+).*,/) {
 		$mapped = $1;
@@ -39,10 +40,62 @@ sub get_vars {
 	$file[$line] =~ /,*\s*([&\w\->\.]+)\s*\);/;
 	$dir = $1;
 	if ($mapped =~ /&\w+/) {
-		print color("red"), "High Risk..." ;
+		print color("red");
+		print "High Risk... ";
+		print color("reset");
 	}
-	printf "$mapped to $dir\n";
-	color("reset");
+	$mapped =~ /&*(\w+)\W*/;
+	my $tmp = '(undef)';
+	$tmp = $1 if defined ($1);
+	printf "$mapped [$tmp] to $dir\n";
+}
+
+sub grep_file {
+	my $regex = shift;
+
+	foreach (@file) {
+		next unless /$regex\W/;
+		print "$_\n";
+	}
+}
+
+sub rec_grep {
+	my ($m, $l) = @_;
+	my $v = undef;
+
+	$m =~ /&*(\w+)\W*/;
+	$cur = $1 if defined ($1);
+
+	while ($l > 0) {
+		$l-- and next unless defined $file[$l];
+		$l-- and next if $file[$l] =~ /^\s*\*/;
+		$l-- and next if $file[$l] =~ /^[\w\s]$/;
+
+		if ($file[$l] =~ /\*\//) {
+			printf "Comment: $file[$l]\n";
+			until  ($file[$l] =~ /\/\*/) {
+				$l--;
+				printf "Comment: $file[$l]\n";
+			}
+		}
+		if ($file[$l] =~ /\s+$cur\s*=/) {
+			$v = 1;
+		}
+		if ($file[$l] =~ /\w+\s+\**$cur\W/) {
+			$v = 1;
+		}
+
+		if (defined $v) {
+			print "$file[$l]\n" ;
+			return;
+		}
+		$v = undef;
+		$l--;
+	}
 }
 
 get_vars $line;
+#grep_file $mapped;
+rec_grep $mapped, $line;
+
+

@@ -60,6 +60,7 @@ function parse_file {
 	for l in `grep $line $callers|cut -d" " -f3`;
 	do
 	#func=`cut`
+		echo "$path/prep.pl -f $line -l $l;"
 		$path/prep.pl -f $line -l $l;
 	done
 
@@ -75,11 +76,12 @@ function get_callers {
 		cscope -dL -3 $func >> $callers
 	done
 	cut -d" " -f 1 $callers|sort|uniq |grep -P "scsi|firewire|nvme" > $uniq_callers
+	#cut -d" " -f 1 $callers|sort|uniq > $uniq_callers
 	wc -l $callers
 	wc -l $uniq_callers
 }
 
-[ ! -e $all_funcs ] && echo "pfunct -s vmlinux > /tmp/pfunct.txt"
+[ ! -e $all_funcs ] && echo "pfunct -sP vmlinux > /tmp/pfunct.txt"
 [ ! -e $all_structs ] && echo "pahole --sizes vmlinux > /tmp/pahole.txt"
 
 get_callers;
