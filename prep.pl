@@ -67,15 +67,17 @@ sub rec_grep {
 	$cur = $1 if defined ($1);
 
 	while ($l > 0) {
-		$l-- and next unless defined $file[$l];
-		$l-- and next if $file[$l] =~ /^\s*\*/;
-		$l-- and next if $file[$l] =~ /^[\w\s]$/;
 
+		$l-- and next unless defined $file[$l];
+	#	$l-- and next if $file[$l] =~ /^\s*\*/;
+		$l-- and next if $file[$l] =~ /^[\*\w\s]$/;
+
+		#print "$file[$l]\n" ;
 		if ($file[$l] =~ /\*\//) {
-			printf "Comment: $file[$l]\n";
+			#printf "Comment: $file[$l]\n";
 			until  ($file[$l] =~ /\/\*/) {
 				$l--;
-				printf "Comment: $file[$l]\n";
+			#	printf "Comment: $file[$l]\n";
 			}
 		}
 		if ($file[$l] =~ /\s+$cur\s*=/) {
@@ -86,7 +88,7 @@ sub rec_grep {
 		}
 
 		if (defined $v) {
-			print "$file[$l]\n" ;
+			print ">>>$file[$l]\n" ;
 			return;
 		}
 		$v = undef;
@@ -97,5 +99,3 @@ sub rec_grep {
 get_vars $line;
 #grep_file $mapped;
 rec_grep $mapped, $line;
-
-
