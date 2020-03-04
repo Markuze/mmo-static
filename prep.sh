@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #TODO: RM grep from get_callers
-#DEBUG=1
+DEBUG=1
 path=$(dirname `realpath $0`)
 cd ~/ubuntu-bionic
 

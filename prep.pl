@@ -58,17 +58,18 @@ sub get_vars {
 		show_init_tatus();
 		rec_grep($mapped, $line);
 	}
-#elsif ($mapped =~ /\->/) {
-#	print color("blue");
-#	print "Indirect Mapp... ";
-#	print color("reset");
-#	show_init_tatus();
-#} else {
-#	print color("magenta");
-#	print "Direct Mapp... ";
-#	print color("reset");
-#	show_init_tatus();
-#}
+	elsif ($mapped =~ /\->/) {
+		print color("blue");
+		print "Indirect Mapp... ";
+		print color("reset");
+		show_init_tatus();
+	} else {
+		print color("magenta");
+		print "Direct Mapp... ";
+		print color("reset");
+		show_init_tatus();
+		rec_grep($mapped, $line);
+	}
 }
 
 sub grep_file {
@@ -80,11 +81,22 @@ sub grep_file {
 	}
 }
 
+sub error {
+	my $line = shift;
+	print color("red");
+	print "$line\n";
+	print color("reset");
+	exit -1;
+}
+
+
 sub collect_cb {
 	my ($prfx, $struct, $file) = @_;
+	my $callback_count = 0;
 	$struct{$struct} = undef;
-	printf "pahole -C $struct -E $file\n" if defined ($verbose);
-	my @out = qx(/usr/bin/pahole -C $struct -E $file 2>/dev/null);
+	error "No Such File:$file" unless -e $file;
+	printf "pahole -C $struct -EAa $file\n" if defined ($verbose);
+	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
 	#|grep -q -P \"^\s*\w+\**\s+\(\""
 	print "@out\n" if defined ($verbose);
 
@@ -92,8 +104,11 @@ sub collect_cb {
 	my @cb = grep(/^\s*\w+\**\s+\(/, @out);
 	if (@cb > 0) {
 		my $num = @cb;
-		printf(" $num Callbacks exposed in ${prfx}$struct\n");
+		if ($prfx eq '' or defined $verbose) {
+			printf(" $num Callbacks exposed in ${prfx}$struct\n");
+		}
 		print "@cb\n" if defined $verbose;
+		$callback_count += $num;
 	}
 	#struct callbacks - thay may contain cal;lbacks
 	my @st = grep(/^\s*struct\s+(\w+)\s+\*+/, @out);
@@ -103,8 +118,9 @@ sub collect_cb {
 		next if exists $struct{$1};
 		$struct{$1} = undef;
 		#print "struct $1\n";
-		collect_cb("${prfx}$struct->", $1, $file);
+		$callback_count += collect_cb("${prfx}$struct->", $1, $file);
 	}
+	return $callback_count;
 }
 
 sub rec_grep {
@@ -147,9 +163,18 @@ sub rec_grep {
 				my $struct = $1;
 				printf "struct $struct\n";
 				%struct = ();
-				collect_cb("",$struct, $file);
-			}
+				my $cb = collect_cb("",$struct, $file);
+				print color('bright_red');
+				print "Total Possible callbacks $cb\n";
+				print  color('reset');
+			} else {
+				if ($file[$l] =~ /(\w+)\s+\**\s*$cur/) {
+				print color('bright_blue');
+				print "Now need to support $1\n";
+				print  color('reset');
 
+				}
+			}
 			return;
 		}
 
