@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #TODO: RM grep from get_callers
-
+#DEBUG=1
 path=$(dirname `realpath $0`)
 cd ~/ubuntu-bionic
 
@@ -60,7 +60,7 @@ function parse_file {
 	for l in `grep $line $callers|cut -d" " -f3`;
 	do
 	#func=`cut`
-		echo "$path/prep.pl -f $line -l $l;"
+		[ $DEBUG ] && echo "$path/prep.pl -f $line -l $l;"
 		$path/prep.pl -f $line -l $l;
 	done
 
