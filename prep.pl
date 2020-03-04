@@ -123,6 +123,33 @@ sub collect_cb {
 	return $callback_count;
 }
 
+sub linearize {
+	my ($line, $cur) = @_;
+	my $linear;
+	my $str = $file[$line];
+	$str =~ s/^\s+//;
+	$linear = $str;
+
+	my $tmp = $line;
+	until ($file[$tmp] =~ /;|^{/) {
+		$tmp++;
+		$str = $file[$tmp];
+		$str =~ s/^\s+//;
+		$linear.= $str;
+	}
+	if ($file[$line] =~ /[,\(][\w\*\s]+$cur/
+		or $file[$line] =~ /^\s+[\w\*\s]+$cur/) {
+		until ($file[$line] =~ /^\w+|;/) {
+			$line--;
+			$str = $file[$line];
+			$str =~ s/^\s+//;
+			$linear = $str.$linear;
+		}
+	}
+	printf "$linear\n" if defined $verbose;
+	return $linear;
+}
+
 sub rec_grep {
 	my ($m, $l) = @_;
 	my $v = undef;
@@ -169,10 +196,21 @@ sub rec_grep {
 				print  color('reset');
 			} else {
 				if ($file[$l] =~ /(\w+)\s+\**\s*$cur/) {
-				print color('bright_blue');
-				print "Now need to support $1\n";
-				print  color('reset');
-
+					my $type = $1;
+					unless ( $type =~ /void|char/) {
+						print color('bright_red');
+						print "Now need to support $type\n";
+					} else {
+						my $line = linearize($l, $cur);
+						print color('bright_blue');
+						if ($line =~ /(\w+)\([\w,\*\s]*$cur/) {
+							print "Start recursing...\n";
+							printf "$1\n";
+						} else {
+							print "Local buffer...\n";
+						}
+					}
+						print  color('reset');
 				}
 			}
 			return;
