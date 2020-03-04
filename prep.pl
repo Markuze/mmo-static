@@ -57,17 +57,18 @@ sub get_vars {
 		print color("reset");
 		show_init_tatus();
 		rec_grep($mapped, $line);
-	} elsif ($mapped =~ /\->/) {
-		print color("blue");
-		print "Indirect Mapp... ";
-		print color("reset");
-		show_init_tatus();
-	} else {
-		print color("magenta");
-		print "Direct Mapp... ";
-		print color("reset");
-		show_init_tatus();
 	}
+#elsif ($mapped =~ /\->/) {
+#	print color("blue");
+#	print "Indirect Mapp... ";
+#	print color("reset");
+#	show_init_tatus();
+#} else {
+#	print color("magenta");
+#	print "Direct Mapp... ";
+#	print color("reset");
+#	show_init_tatus();
+#}
 }
 
 sub grep_file {
@@ -126,6 +127,7 @@ sub rec_grep {
 				$l--;
 			#	printf "Comment: $file[$l]\n";
 			}
+			$l--;
 		}
 
 		# Assignment
@@ -135,13 +137,13 @@ sub rec_grep {
 		}
 
 		# Defenition
-		if ($file[$l] =~ /\w+\s+\**$cur\W/) {
+		if ($file[$l] =~ /\w+\s+\**\s*$cur\W/) {
 			$v = 1;
 			my $file = $opts{'f'};
 			$file =~ s/\.c/\.o/;
 
 			print ">>>$l ) $file[$l]\n";
-			if ($file[$l] =~ /struct\s+(\w+)\s+\**$cur/) {
+			if ($file[$l] =~ /struct\s+(\w+)\s+\**\s*$cur/) {
 				my $struct = $1;
 				printf "struct $struct\n";
 				%struct = ();
