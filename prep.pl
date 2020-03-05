@@ -63,6 +63,7 @@ sub get_vars {
 		print "Indirect Mapp... ";
 		print color("reset");
 		show_init_tatus();
+		rec_grep($mapped, $line);
 	} else {
 		print color("magenta");
 		print "Direct Mapp... ";
