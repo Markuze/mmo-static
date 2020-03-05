@@ -11,6 +11,8 @@ use Tie::File;
 use Getopt::Std;
 use Term::ANSIColor;
 use Term::ANSIColor qw(:constants);
+use File::Basename;
+use File::Spec::Functions;
 
 use Cwd;
 
@@ -44,6 +46,10 @@ sub verbose {
 	printf @_ if defined $verbose;
 	print  color('reset');
 }
+
+sub warning {
+	print BOLD, YELLOW, @_, RESET;
+}
 #################### FUNCTIONS ####################
 sub cscope_add_entry {
 	my ($file, $line) = @_;
@@ -66,6 +72,10 @@ sub cscope_array {
 	}
 }
 #################### MAIN #########################3
+my $dir = dirname $0;
+$dir = File::Spec->rel2abs($dir);
+printf "$0 [$dir]\n";
+
 chdir $KERNEL_DIR;
 
 printf "%s\n", getcwd;
@@ -78,6 +88,11 @@ for (@ROOT_FUNCS) {
 
 my $d = 1;
 for (keys %cscope_lines) {
+	my $ofile = $_;
+	$ofile =~ s/\.c/\.o/;
 	verbose "$d)\t$_\n";
 	$d++;
+	verbose "Please compile $ofile\n" unless (-e $ofile);
+	printf "Problem $dir/try_set.sh\n" unless (-e "$dir/try_set.sh");
+	#system("mmo/try_set.sh -f $_") unless (-e $ofile);
 }
