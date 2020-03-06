@@ -1,0 +1,13 @@
+# Mapping type: high risk, direct, indirect.
+# Direct:
+# Alloc, definition local.
+# Function call ...
+#
+# 0. High risk : done -
+# 0.1 : Annon structs (adapter_t)
+# 0.2 : Pahole -i <class> - when mapped structed is in a bigger struct.
+# 1. Direct, Alloc
+# 2. Direct, Func call
+
+
+#consider hacking slub (https://lwn.net/Articles/229984/) to force mapping specific addresses.

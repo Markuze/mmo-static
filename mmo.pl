@@ -20,15 +20,18 @@ use Cwd;
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
+my $TRY_CONFIG = undef;
 
 my %cscope_lines : shared = ();
 ####################### INIT #####################
 my %opts = ();
 my $argv = "@ARGV";
-getopts('vk:l:', \%opts);
+getopts('vk:c', \%opts);
 
 $KERNEL_DIR = $opts{'k'} if defined $opts{'k'};
 $verbose = 1 if defined $opts{'v'};
+$TRY_CONFIG = 1 if defined $opts{'c'};
+
 
 use constant {
 	NEW => 0,
@@ -92,7 +95,8 @@ for (keys %cscope_lines) {
 	$ofile =~ s/\.c/\.o/;
 	verbose "$d)\t$_\n";
 	$d++;
-	verbose "Please compile $ofile\n" unless (-e $ofile);
-	printf "Problem $dir/try_set.sh\n" unless (-e "$dir/try_set.sh");
-	#system("mmo/try_set.sh -f $_") unless (-e $ofile);
+	unless (-e $ofile) {
+		warning "Please compile $ofile\n";
+		system("$dir/try_set.sh -f $_") if defined $TRY_CONFIG;
+	}
 }
