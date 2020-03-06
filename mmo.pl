@@ -23,6 +23,11 @@ my $verbose = undef;
 my $TRY_CONFIG = undef;
 
 my %cscope_lines : shared = ();
+my @cscope_lines : shared = ();
+my $CURR_FILE = undef; #per thread variable
+my $CURR_FUNC = undef; #per thread variable
+my @CURR_STACK = ();
+my %struct = ();
 ####################### INIT #####################
 my %opts = ();
 my $argv = "@ARGV";
@@ -50,20 +55,89 @@ sub verbose {
 	print  color('reset');
 }
 
+sub alert {
+	print BOLD, BRIGHT_RED, @_, RESET;
+}
+
 sub warning {
 	print BOLD, YELLOW, @_, RESET;
 }
+
+sub get_next {
+	lock @cscope_lines;
+	return pop @cscope_lines;
+}
 #################### FUNCTIONS ####################
+sub collect_cb {
+	my ($prfx, $struct, $file) = @_;
+	my $callback_count = 0;
+	$struct{$struct} = undef;
+
+	alert "No Such File:$file\n" and return 0 unless -e $file;
+
+	#verbose "pahole -C $struct -EAa $file\n";
+	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
+	#|grep -q -P \"^\s*\w+\**\s+\(\""
+	#print "@out\n" if defined ($verbose);
+
+	#direct callbacks
+	my @cb = grep(/^\s*\w+\**\s+\(/, @out);
+	if (@cb > 0) {
+		my $num = @cb;
+		if ($prfx eq '') {
+		        printf(" $num Callbacks exposed in ${prfx}$struct\n");
+		}
+		#print "@cb\n" if defined $verbose;
+		$callback_count += $num;
+	}
+	#struct callbacks - thay may contain cal;lbacks
+	my @st = grep(/^\s*struct\s+(\w+)\s+\*+/, @out);
+	#\s*\*+\s*(\w+)
+	foreach (@st) {
+	        /^\s*struct\s+(\w+)\s+\*+/;
+	        next if exists $struct{$1};
+	        $struct{$1} = undef;
+	        #print "struct $1\n";
+	        $callback_count += collect_cb("${prfx}$struct->", $1, $file);
+	}
+	return $callback_count;
+}
+
+sub linearize {
+	my ($file, $line) = @_;
+	my $linear;
+	my $str = ${$file}[$line];
+	$str =~ s/^\s+//;
+	$linear = $str;
+
+	my $tmp = $line;
+	until (${$file}[$tmp] =~ /;|^{/) {
+		$tmp++;
+		$str = ${$file}[$tmp];
+		$str =~ s/^\s+//;
+		$linear.= $str;
+	}
+	until (${$file}[$line -1] =~ /[{};]|^#|\*\//) {
+		$line--;
+		$str = ${$file}[$line];
+		$str =~ s/^\s+//;
+		$linear = $str.$linear;
+	}
+	printf "$linear\n" if defined $verbose;
+	return $linear;
+}
+
 sub cscope_add_entry {
 	my ($file, $line) = @_;
 	my $l = ${$line}[2];
-	my %rec : shared = ('status' => NEW);
+	my %rec : shared = ('file' => "$file");
 	unless (exists $cscope_lines{"$file"} ){
 		lock %cscope_lines;
 		 $cscope_lines{"$file"} = \%rec;
+		push @cscope_lines, \%rec;
 	}
 	lock %{$cscope_lines{"$file"}};
-	$cscope_lines{"$file"}{$l} = NEW unless exists $cscope_lines{"$file"};
+	$cscope_lines{"$file"}{$l} = ${$line}[1] unless exists $cscope_lines{"$file"}{$l};
 }
 
 sub cscope_array {
@@ -73,6 +147,111 @@ sub cscope_array {
 		my @line = split /\s/, $_;
 		cscope_add_entry $line[0], \@line;
 	}
+}
+
+sub handle_declaration {
+	my ($file, $line, $param, $match, $type) = @_;
+	my $name = $CURR_FILE;
+	$name =~ s/\.c/\.o/;
+
+	print "\t$line ) $$file[$line]\n";
+	if ($param =~ /&\w+/) {
+		alert "High Risk\n";
+		if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
+			my $struct = $1;
+			printf "struct $struct\n";
+			%struct = ();
+			my $cb = collect_cb("",$struct, $name);
+			alert "Total Possible callbacks $cb\n";
+		}
+	} elsif ($param =~ /\->/) {
+		warning "NO support mapped fields\n";
+	} else {
+		if ($$file[$line] =~ /$match\s*=|$match\s*;/) {
+			alert "Direct Map\n";
+			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
+				my $struct = $1;
+				printf "struct $struct\n";
+				%struct = ();
+				my $cb = collect_cb("",$struct, $name);
+				alert "Total Possible callbacks $cb\n";
+			}
+
+		} else {
+			my $str = linearize $file, $line;
+			warning "Add support to recurse ($CURR_FUNC)\n";
+		}
+	}
+
+}
+
+sub get_definition {
+	my ($file, $line, $param) = @_;
+	my $type = undef;
+	my $match;
+
+	$param =~ /&*(\w+)\W*/;
+	$match = $1; #if defined $1;
+	$match = $param unless defined $match;
+
+	while ($line > 0) {
+		$line-- and next unless defined $$file[$line];
+		$line-- and next if $$file[$line] =~ /^[\*\w\s]$/;
+
+		if ($$file[$line] =~ /\*\//) {
+			#printf "Comment: $file[$l]\n";
+			until  ($$file[$line] =~ /\/\*/) {
+				$line--;
+			#       printf "Comment: $file[$l]\n";
+			}
+			$line--;
+                }
+
+		if ($$file[$line] =~ /\s+$match\s*=/) {
+			print "\t$line ) $$file[$line]\n";
+			$type = $$file[$line];
+		}
+
+		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
+			handle_declaration ($file, $line, $param, $match, $type);
+			return;
+		}
+		$line--;
+	}
+
+}
+
+sub parse_file_line {
+	my ($file, $line, $entry_num, $dir_entry) = @_;
+	$entry_num = 0 unless defined $entry_num; # second param
+	$dir_entry = 2 unless defined $dir_entry; # forth param
+
+	my $linear = linearize $file, $line -1;
+	my @vars = split /,/, $linear;
+	shift @vars;
+	$vars[$#vars] =~ s/\);//;
+	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
+	get_definition $file, $line, $vars[$entry_num];
+}
+
+sub start_parsing {
+	my $file = get_next() ;
+
+	while (defined $file) {
+		$CURR_FILE = delete ${$file}{'file'};
+		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
+			verbose "$CURR_FILE\n";
+			tie my @file, 'Tie::File', $CURR_FILE;
+
+			foreach (keys %{$file}) {
+			#foreach (keys %{$cscope_lines{"$name"}}) {
+				$CURR_FUNC = ${$file}{$_};
+				verbose "$_\n";
+				parse_file_line \@file, $_;
+			}
+		}
+		$file = get_next();
+	};
 }
 #################### MAIN #########################3
 my $dir = dirname $0;
@@ -89,14 +268,18 @@ for (@ROOT_FUNCS) {
 	cscope_array(\@cscope);
 }
 
-my $d = 1;
-for (keys %cscope_lines) {
-	my $ofile = $_;
-	$ofile =~ s/\.c/\.o/;
-	verbose "$d)\t$_\n";
-	$d++;
-	unless (-e $ofile) {
-		warning "Please compile $ofile\n";
-		system("$dir/try_set.sh -f $_") if defined $TRY_CONFIG;
+if (defined $TRY_CONFIG) {
+	my $d = 1;
+	for (keys %cscope_lines) {
+		my $ofile = $_;
+		$ofile =~ s/\.c/\.o/;
+		verbose "$d)\t$_\n";
+		$d++;
+		unless (-e $ofile) {
+			warning "Please compile $ofile\n";
+			system("$dir/try_set.sh -f $_") if defined $TRY_CONFIG;
+		}
 	}
 }
+
+start_parsing;
