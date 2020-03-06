@@ -180,6 +180,13 @@ sub handle_declaration {
 		} else {
 			my $str = linearize $file, $line;
 			warning "Add support to recurse ($CURR_FUNC)\n";
+			my @cscope = qx(cscope -dL -3 $CURR_FUNC);
+			printf "@cscope\n";
+			###
+			# 1. Read file if different from curr
+			# 2. handle case where loc is neq 2
+			# 3. Do handle mapping
+			parse_file_line \@file, $_;
 		}
 	}
 
