@@ -175,6 +175,10 @@ sub handle_declaration {
 				%struct = ();
 				my $cb = collect_cb("",$struct, $name);
 				alert "Total Possible callbacks $cb\n";
+				if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
+					alert "HEAP mapped!!!\n";
+					#pqi_map_single
+				}
 			}
 
 		} else {
@@ -186,7 +190,21 @@ sub handle_declaration {
 			# 1. Read file if different from curr
 			# 2. handle case where loc is neq 2
 			# 3. Do handle mapping
-			parse_file_line \@file, $_;
+			for (@cscope) {
+				my @line = split /\s/, $_;
+
+				if ($line[0] eq $CURR_FILE) {
+					my $cfile = $CURR_FILE;
+					my $cfunc = $CURR_FUNC;
+					$CURR_FILE = $line[0];
+					$CURR_FUNC = $line[1];
+					parse_file_line($file, $line[2]);
+					$CURR_FILE = $cfile;
+					$CURR_FUNC = $cfunc;
+				} else {
+					alert "Please Handle this...\n";
+				}
+			}
 		}
 	}
 
