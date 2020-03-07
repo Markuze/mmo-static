@@ -190,10 +190,11 @@ sub handle_declaration {
 			my $str = linearize $file, $line;
 			warning "Dev in progress recurse ($CURR_FUNC)\n";
 			$str =~ /$CURR_FUNC\((.*)\)\{/;
+			my $i = 2;
 			if (defined $1) {
 				warning "$str: $1 ($match)\n";
 				my @vars = split /,/, $str;
-				my $i = 0;
+				$i = 0;
 				foreach (@vars) {
 					last if /$match/;
 					$i++
@@ -203,7 +204,7 @@ sub handle_declaration {
 				alert "$str\n";
 			}
 			my @cscope = qx(cscope -dL -3 $CURR_FUNC);
-			printf "@cscope\n";
+			verbose "@cscope\n";
 			###
 			# 1. Read file if different from curr
 			# 2. handle case where loc is neq 2
@@ -213,13 +214,14 @@ sub handle_declaration {
 				my $cfile = $CURR_FILE;
 				my $cfunc = $CURR_FUNC;
 
+				printf "Recursing to $_\n";
 				$CURR_FUNC = $line[1];
 				if ($line[0] eq $CURR_FILE) {
-					parse_file_line($file, $line[2]);
+					parse_file_line($file, $line[2], $i);
 				} else {
 					$CURR_FILE = $line[0];
 					tie my @file_text, 'Tie::File', $line[0];
-					parse_file_line(\@file_text, $line[2]);
+					parse_file_line(\@file_text, $line[2], $i);
 					$CURR_FILE = $cfile;
 				}
 				$CURR_FUNC = $cfunc;
@@ -267,12 +269,12 @@ sub get_definition {
 
 sub parse_file_line {
 	my ($file, $line, $entry_num, $dir_entry) = @_;
-	$entry_num = 0 unless defined $entry_num; # second param
-	$dir_entry = 2 unless defined $dir_entry; # forth param
+	$entry_num = 1 unless defined $entry_num; # second param
+	$dir_entry = 3 unless defined $dir_entry; # forth param
 
 	my $linear = linearize $file, $line -1;
 	my @vars = split /,/, $linear;
-	shift @vars;
+	#shift @vars;
 	$vars[$#vars] =~ s/\);//;
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
 	get_definition $file, $line, $vars[$entry_num];
@@ -326,4 +328,16 @@ if (defined $TRY_CONFIG) {
 	}
 }
 
-start_parsing;
+my $nproc = `nproc`;
+my @threads;
+
+while ($nproc--) {
+	my $th = threads->create(\&start_parsing);
+	push @threads, $th;
+}
+
+for (@threads) {
+	$_->join();
+}
+printf "Done waiting...\n";
+#start_parsing;
