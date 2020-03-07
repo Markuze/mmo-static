@@ -123,7 +123,7 @@ sub linearize {
 		$str =~ s/^\s+//;
 		$linear = $str.$linear;
 	}
-	printf "$linear\n" if defined $verbose;
+	verbose "$linear\n";
 	return $linear;
 }
 
@@ -165,25 +165,43 @@ sub handle_declaration {
 			alert "Total Possible callbacks $cb\n";
 		}
 	} elsif ($param =~ /\->/) {
-		warning "NO support mapped fields\n";
+		warning "NO support mapped fields ($param)\n";
 	} else {
 		if ($$file[$line] =~ /$match\s*=|$match\s*;/) {
-			alert "Direct Map\n";
+			alert "Direct Map: $$file[$line]\n";
 			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
 				my $struct = $1;
-				printf "struct $struct\n";
 				%struct = ();
 				my $cb = collect_cb("",$struct, $name);
-				alert "Total Possible callbacks $cb\n";
+				if ($cb > 0) {
+					alert "Total Possible callbacks $cb\n";
+				} else {
+					warning "Need to check if nested...\n";
+				}
 				if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
 					alert "HEAP mapped!!!\n";
 					#pqi_map_single
+				} else {
+					warning "SLUB entry\n";
 				}
 			}
 
 		} else {
 			my $str = linearize $file, $line;
-			warning "Add support to recurse ($CURR_FUNC)\n";
+			warning "Dev in progress recurse ($CURR_FUNC)\n";
+			$str =~ /$CURR_FUNC\((.*)\)\{/;
+			if (defined $1) {
+				warning "$str: $1 ($match)\n";
+				my @vars = split /,/, $str;
+				my $i = 0;
+				foreach (@vars) {
+					last if /$match/;
+					$i++
+				}
+				warning "entry: $i\n";
+			} else {
+				alert "$str\n";
+			}
 			my @cscope = qx(cscope -dL -3 $CURR_FUNC);
 			printf "@cscope\n";
 			###
@@ -192,18 +210,19 @@ sub handle_declaration {
 			# 3. Do handle mapping
 			for (@cscope) {
 				my @line = split /\s/, $_;
+				my $cfile = $CURR_FILE;
+				my $cfunc = $CURR_FUNC;
 
+				$CURR_FUNC = $line[1];
 				if ($line[0] eq $CURR_FILE) {
-					my $cfile = $CURR_FILE;
-					my $cfunc = $CURR_FUNC;
-					$CURR_FILE = $line[0];
-					$CURR_FUNC = $line[1];
 					parse_file_line($file, $line[2]);
-					$CURR_FILE = $cfile;
-					$CURR_FUNC = $cfunc;
 				} else {
-					alert "Please Handle this...\n";
+					$CURR_FILE = $line[0];
+					tie my @file_text, 'Tie::File', $line[0];
+					parse_file_line(\@file_text, $line[2]);
+					$CURR_FILE = $cfile;
 				}
+				$CURR_FUNC = $cfunc;
 			}
 		}
 	}
