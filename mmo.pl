@@ -21,6 +21,8 @@ my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
 my $TRY_CONFIG = undef;
+my $FH;
+my $TID;
 
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
@@ -49,23 +51,63 @@ sub usage {
         die "bad command: $0 $argv\nusage: $0\n";
 }
 
+sub new_trace {
+	$FH = *STDOUT unless defined $FH;;
+	print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "@_", RESET;
+}
+
+sub trace {
+	$FH = *STDOUT unless defined $FH;;
+	print $FH ITALIC, BRIGHT_BLUE, "@_", RESET;
+}
+
 sub verbose {
-	print color('bright_green');
-	printf @_ if defined $verbose;
-	print  color('reset');
+	$FH = *STDOUT unless defined $FH;;
+	print $FH color('bright_green');
+	print $FH @_ if defined $verbose;
+	print  $FH color('reset');
+}
+
+sub panic {
+	print BOLD, RED, "@_", RESET;
+	die "Error encountered\n";
 }
 
 sub alert {
-	print BOLD, BRIGHT_RED, @_, RESET;
+	$FH = *STDOUT unless defined $FH;
+	my $prfx = dirname $CURR_FILE;
+	$prfx = "$TID: $prfx) $CURR_FUNC:\t";
+	print $FH BOLD, BRIGHT_RED, $prfx, @_, RESET;
+	print BOLD, BRIGHT_RED, $prfx, @_, RESET;
 }
 
 sub warning {
-	print BOLD, YELLOW, @_, RESET;
+	$FH = *STDOUT unless defined $FH;;
+	print $FH BOLD, YELLOW, @_, RESET;
 }
 
 sub get_next {
 	lock @cscope_lines;
 	return pop @cscope_lines;
+}
+
+sub get_param_idx {
+	my ($str, $match) = @_;
+	$str =~ /$CURR_FUNC\((.*)\)\{/;
+	my $i = 2;
+	if (defined $1) {
+		verbose "$1 ($match)\n";
+		my @vars = split /,/, $str;
+		$i = 0;
+		foreach (@vars) {
+			last if /$match/;
+			$i++
+		}
+		warning "entry: $i\n";
+	} else {
+		alert "ERRO: cant parse for idx: $str\n";
+	}
+	return $i;
 }
 #################### FUNCTIONS ####################
 sub collect_cb {
@@ -85,7 +127,7 @@ sub collect_cb {
 	if (@cb > 0) {
 		my $num = @cb;
 		if ($prfx eq '') {
-		        printf(" $num Callbacks exposed in ${prfx}$struct\n");
+		        alert(" $num Callbacks exposed in ${prfx}$struct\n");
 		}
 		#print "@cb\n" if defined $verbose;
 		$callback_count += $num;
@@ -111,7 +153,7 @@ sub linearize {
 	$linear = $str;
 
 	my $tmp = $line;
-	until (${$file}[$tmp] =~ /;|^{/) {
+	until (${$file}[$tmp] =~ /;|{/) {
 		$tmp++;
 		$str = ${$file}[$tmp];
 		$str =~ s/^\s+//;
@@ -123,7 +165,7 @@ sub linearize {
 		$str =~ s/^\s+//;
 		$linear = $str.$linear;
 	}
-	verbose "$linear\n";
+	#verbose "$linear\n";
 	return $linear;
 }
 
@@ -149,32 +191,64 @@ sub cscope_array {
 	}
 }
 
+sub cscope_recurse {
+	my ($file, $str, $match, $field) = @_;
+	my $idx = get_param_idx($str, $match);
+	my @cscope = qx(cscope -dL -3 $CURR_FUNC);
+	###
+	# 1. Read file if different from curr
+	# 2. handle case where loc is neq 2
+	# 3. Do handle mapping
+
+	$field = undef if ($match eq $field);
+
+	for (@cscope) {
+		my @line = split /\s/, $_;
+		my $cfile = $CURR_FILE;
+		my $cfunc = $CURR_FUNC;
+
+		trace "Recursing to $_\n";
+		$CURR_FUNC = $line[1];
+		if ($line[0] eq $CURR_FILE) {
+			parse_file_line($file, $line[2], $field, $idx);
+		} else {
+			$CURR_FILE = $line[0];
+			tie my @file_text, 'Tie::File', $line[0];
+			parse_file_line(\@file_text, $line[2], $field, $idx);
+			$CURR_FILE = $cfile;
+		}
+		$CURR_FUNC = $cfunc;
+	}
+}
+
 sub handle_declaration {
-	my ($file, $line, $param, $match, $type) = @_;
+	my ($file, $line, $param, $match, $field, $type) = @_;
 	my $name = $CURR_FILE;
+	my $str = linearize $file, $line;
 	$name =~ s/\.c/\.o/;
 
-	print "\t$line ) $$file[$line]\n";
+	trace "$line ]>($param [$match][$field]) $str\n";
 	if ($param =~ /&\w+/) {
 		alert "High Risk\n";
 		if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
 			my $struct = $1;
-			printf "struct $struct\n";
+			trace ")>struct $struct\n";
 			%struct = ();
 			my $cb = collect_cb("",$struct, $name);
 			alert "Total Possible callbacks $cb\n";
 		}
 	} elsif ($param =~ /\->/) {
 		warning "NO support mapped fields ($param)\n";
+		#cscope_recurse $file, $str, $match, $field;
 	} else {
 		if ($$file[$line] =~ /$match\s*=|$match\s*;/) {
-			alert "Direct Map: $$file[$line]\n";
+			warning "Direct Map: $$file[$line]\n";
 			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
 				my $struct = $1;
 				%struct = ();
 				my $cb = collect_cb("",$struct, $name);
 				if ($cb > 0) {
-					alert "Total Possible callbacks $cb\n";
+					warning "Total Possible callbacks $cb\n";
 				} else {
 					warning "Need to check if nested...\n";
 				}
@@ -187,58 +261,29 @@ sub handle_declaration {
 			}
 
 		} else {
-			my $str = linearize $file, $line;
-			warning "Dev in progress recurse ($CURR_FUNC)\n";
-			$str =~ /$CURR_FUNC\((.*)\)\{/;
-			my $i = 2;
-			if (defined $1) {
-				warning "$str: $1 ($match)\n";
-				my @vars = split /,/, $str;
-				$i = 0;
-				foreach (@vars) {
-					last if /$match/;
-					$i++
-				}
-				warning "entry: $i\n";
-			} else {
-				alert "$str\n";
-			}
-			my @cscope = qx(cscope -dL -3 $CURR_FUNC);
-			verbose "@cscope\n";
-			###
-			# 1. Read file if different from curr
-			# 2. handle case where loc is neq 2
-			# 3. Do handle mapping
-			for (@cscope) {
-				my @line = split /\s/, $_;
-				my $cfile = $CURR_FILE;
-				my $cfunc = $CURR_FUNC;
-
-				printf "Recursing to $_\n";
-				$CURR_FUNC = $line[1];
-				if ($line[0] eq $CURR_FILE) {
-					parse_file_line($file, $line[2], $i);
-				} else {
-					$CURR_FILE = $line[0];
-					tie my @file_text, 'Tie::File', $line[0];
-					parse_file_line(\@file_text, $line[2], $i);
-					$CURR_FILE = $cfile;
-				}
-				$CURR_FUNC = $cfunc;
-			}
+			warning "Dev in progress recurse [$CURR_FUNC]\n";
+			cscope_recurse $file, $str, $match, $field;
 		}
 	}
 
 }
 
 sub get_definition {
-	my ($file, $line, $param) = @_;
+	my ($file, $line, $param, $field) = @_;
 	my $type = undef;
-	my $match;
+	my $match = $param;
 
-	$param =~ /&*(\w+)\W*/;
+	panic("$CURR_FILE: $line\n") unless defined $param;
+	$match =~ /&*(\w+)\W*/;
 	$match = $1; #if defined $1;
 	$match = $param unless defined $match;
+
+	unless (defined $field) {
+		$field = $param;
+		$field =~ /\W*(\w+)$/;
+		$field = $1;
+		verbose "$param: $match -- $field\n";
+	}
 
 	while ($line > 0) {
 		$line-- and next unless defined $$file[$line];
@@ -253,13 +298,13 @@ sub get_definition {
 			$line--;
                 }
 
-		if ($$file[$line] =~ /\s+$match\s*=/) {
-			print "\t$line ) $$file[$line]\n";
+		if ($$file[$line] =~ /\s+$field\s*=/) {
+			trace "$line ]] $$file[$line]\n";
 			$type = $$file[$line];
 		}
 
 		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
-			handle_declaration ($file, $line, $param, $match, $type);
+			handle_declaration ($file, $line, $param, $match, $field, $type);
 			return;
 		}
 		$line--;
@@ -268,31 +313,34 @@ sub get_definition {
 }
 
 sub parse_file_line {
-	my ($file, $line, $entry_num, $dir_entry) = @_;
+	my ($file, $line, $field, $entry_num, $dir_entry) = @_;
 	$entry_num = 1 unless defined $entry_num; # second param
 	$dir_entry = 3 unless defined $dir_entry; # forth param
 
 	my $linear = linearize $file, $line -1;
 	my @vars = split /,/, $linear;
-	#shift @vars;
-	$vars[$#vars] =~ s/\);//;
+	$vars[$#vars] =~ s/\).*//;
+
+	trace "$line>> |$vars[$entry_num]| $linear \n";
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
-	get_definition $file, $line, $vars[$entry_num];
+	get_definition $file, $line, $vars[$entry_num], $field;
 }
 
 sub start_parsing {
+	$TID = threads->tid();
+	open $FH, '>', "/tmp/logs/$TID.txt";
 	my $file = get_next() ;
 
 	while (defined $file) {
 		$CURR_FILE = delete ${$file}{'file'};
 		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
-			verbose "$CURR_FILE\n";
+			new_trace "$CURR_FILE\n";
 			tie my @file, 'Tie::File', $CURR_FILE;
 
 			foreach (keys %{$file}) {
 			#foreach (keys %{$cscope_lines{"$name"}}) {
 				$CURR_FUNC = ${$file}{$_};
-				verbose "$_\n";
+				new_trace "$CURR_FUNC: $_\n";
 				parse_file_line \@file, $_;
 			}
 		}
@@ -310,7 +358,7 @@ printf "%s\n", getcwd;
 for (@ROOT_FUNCS) {
 	print ITALIC, CYAN, "$_\n", RESET;
 	my @cscope = qx(cscope -dL -3 $_);
-	verbose("$#cscope : $cscope[0]\n");
+	#verbose("$#cscope : $cscope[0]\n");
 	cscope_array(\@cscope);
 }
 
