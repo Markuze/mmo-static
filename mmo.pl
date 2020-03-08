@@ -327,7 +327,7 @@ sub parse_file_line {
 	panic("$linear\n") unless ($#vars > -1);
 	trace "$line>> |$vars[$entry_num]| $linear \n";
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
-	get_definition $file, $line, $vars[$entry_num], $field;
+	get_definition $file, $line -1, $vars[$entry_num], $field;
 }
 
 sub start_parsing {
@@ -337,8 +337,8 @@ sub start_parsing {
 
 	while (defined $file) {
 		$CURR_FILE = delete ${$file}{'file'};
-		#if ($CURR_FILE =~ /scsi|firewire|nvme/) {
-			$file = get_next() and next if $CURR_FILE =~ /staging/;
+		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
+			#$file = get_next() and next if $CURR_FILE =~ /staging/;
 			new_trace "$CURR_FILE\n";
 			tie my @file, 'Tie::File', $CURR_FILE;
 
@@ -348,7 +348,7 @@ sub start_parsing {
 				new_trace "$CURR_FUNC: $_\n";
 				parse_file_line \@file, $_;
 			}
-		#}
+		}
 		$file = get_next();
 	};
 }
@@ -381,6 +381,7 @@ if (defined $TRY_CONFIG) {
 	}
 }
 
+print ITALIC, CYAN, "Found $#cscope_lines files\n", RESET;
 my $nproc = `nproc`;
 my @threads;
 

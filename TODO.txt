@@ -3,7 +3,8 @@
 # Alloc, definition local.
 # Function call ...
 #
-# 0. High risk : done -
+# 0   : put report: use Hash.
+# 1   : Handle case of $CURR_FUNC == void
 # 0.1 : Annon structs (adapter_t)
 # 0.2 : Pahole -i <class> - when mapped structed is in a bigger struct.
 # 1.  : Mapped fields
