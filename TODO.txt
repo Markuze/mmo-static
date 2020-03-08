@@ -6,8 +6,8 @@
 # 0. High risk : done -
 # 0.1 : Annon structs (adapter_t)
 # 0.2 : Pahole -i <class> - when mapped structed is in a bigger struct.
-# 1. Direct, Alloc
-# 2. Direct, Func call
-
+# 1.  : Mapped fields
+# 2.  : determine assignment : slub, heap, struct.
+# 3.  : skbs
 
 #consider hacking slub (https://lwn.net/Articles/229984/) to force mapping specific addresses.

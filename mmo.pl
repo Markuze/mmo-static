@@ -69,7 +69,8 @@ sub verbose {
 }
 
 sub panic {
-	print BOLD, RED, "@_", RESET;
+	#print BOLD, RED, "@_", RESET;
+	alert(RED, @_);
 	die "Error encountered\n";
 }
 
@@ -105,7 +106,7 @@ sub get_param_idx {
 		}
 		warning "entry: $i\n";
 	} else {
-		alert "ERRO: cant parse for idx: $str\n";
+		panic "ERROR: cant parse for idx: $str\n";
 	}
 	return $i;
 }
@@ -155,6 +156,7 @@ sub linearize {
 	my $tmp = $line;
 	until (${$file}[$tmp] =~ /;|{/) {
 		$tmp++;
+		panic ("$$file[$line]\n") if $tmp > $#{$file};
 		$str = ${$file}[$tmp];
 		$str =~ s/^\s+//;
 		$linear.= $str;
@@ -229,7 +231,7 @@ sub handle_declaration {
 
 	trace "$line ]>($param [$match][$field]) $str\n";
 	if ($param =~ /&\w+/) {
-		alert "High Risk\n";
+		warning "High Risk\n";
 		if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
 			my $struct = $1;
 			trace ")>struct $struct\n";
@@ -241,7 +243,7 @@ sub handle_declaration {
 		warning "NO support mapped fields ($param)\n";
 		#cscope_recurse $file, $str, $match, $field;
 	} else {
-		if ($$file[$line] =~ /$match\s*=|$match\s*;/) {
+		if ($$file[$line] =~ /$match\s*=|$match.*;/) {
 			warning "Direct Map: $$file[$line]\n";
 			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
 				my $struct = $1;
@@ -288,6 +290,7 @@ sub get_definition {
 	while ($line > 0) {
 		$line-- and next unless defined $$file[$line];
 		$line-- and next if $$file[$line] =~ /^[\*\w\s]$/;
+		$line-- and next if $$file[$line] =~ /[%\"]+/;
 
 		if ($$file[$line] =~ /\*\//) {
 			#printf "Comment: $file[$l]\n";
@@ -321,6 +324,7 @@ sub parse_file_line {
 	my @vars = split /,/, $linear;
 	$vars[$#vars] =~ s/\).*//;
 
+	panic("$linear\n") unless ($#vars > -1);
 	trace "$line>> |$vars[$entry_num]| $linear \n";
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
 	get_definition $file, $line, $vars[$entry_num], $field;
@@ -333,7 +337,8 @@ sub start_parsing {
 
 	while (defined $file) {
 		$CURR_FILE = delete ${$file}{'file'};
-		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
+		#if ($CURR_FILE =~ /scsi|firewire|nvme/) {
+			$file = get_next() and next if $CURR_FILE =~ /staging/;
 			new_trace "$CURR_FILE\n";
 			tie my @file, 'Tie::File', $CURR_FILE;
 
@@ -343,7 +348,7 @@ sub start_parsing {
 				new_trace "$CURR_FUNC: $_\n";
 				parse_file_line \@file, $_;
 			}
-		}
+		#}
 		$file = get_next();
 	};
 }
