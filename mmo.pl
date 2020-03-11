@@ -121,7 +121,7 @@ sub get_param_idx {
 }
 #################### FUNCTIONS ####################
 sub collect_cb {
-	my ($prfx, $struct, $file) = @_;
+	my ($prfx, $struct, $file, $field) = @_;
 	my $callback_count = 0;
 	$struct{$struct} = undef;
 
@@ -129,8 +129,11 @@ sub collect_cb {
 
 	#verbose "pahole -C $struct -EAa $file\n";
 	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
-	#|grep -q -P \"^\s*\w+\**\s+\(\""
-	#print "@out\n" if defined ($verbose);
+	if (defined $field) {
+		my @def = grep (/\*\s*$field\w/, @out);
+		verbose "@def";
+		return 0;
+	}
 
 	#direct callbacks
 	my @cb = grep(/^\s*\w+\**\s+\(/, @out);
@@ -212,7 +215,7 @@ sub cscope_recurse {
 	# 3. Do handle mapping
 
 	$field = undef if ($match eq $field);
-	warning "No callers for $CURR_FUNC!!!" unless ($#cscope > -1);
+	warning "Found NO callers for $CURR_FUNC!!!\n" unless ($#cscope > -1);
 	for (@cscope) {
 		my @line = split /\s/, $_;
 		my $cfile = $CURR_FILE;
@@ -246,14 +249,21 @@ sub handle_declaration {
 			trace ")>struct $struct\n";
 			%struct = ();
 			my $cb = collect_cb("",$struct, $name);
-			alert "Total Possible callbacks $cb\n";
+			if ($cb > 0) {
+				alert "Total Possible callbacks $cb\n";
+			} else {
+				warning "Need to check if nested...\n";
+			}
 		}
 	} elsif ($param =~ /\->/) {
 		warning "mapped fields ($param)\n";
-		verbose "$str, $match, $field;\n";
+		verbose "$str|$match|$field;\n";
 		if ($$file[$line] =~ /=\s*(.*);/) {
 			warning "Handle assignment... $1";
+		} elsif ($$file[$line] =~ /$match\s*[\s\w,\*]*;/) {
+			warning "Handle declaration: $str\n";
 		} else {
+			warning "recurse...\n";
 			cscope_recurse $file, $str, $match, $field;
 		}
 	} else {
@@ -261,10 +271,12 @@ sub handle_declaration {
 			warning "Direct Map: $$file[$line]\n";
 			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
 				my $struct = $1;
+				my $mapped_field;
+				$mapped_field = $field unless ($match eq $field);
 				%struct = ();
-				my $cb = collect_cb("",$struct, $name);
+				my $cb = collect_cb("",$struct, $name, $mapped_field);
 				if ($cb > 0) {
-					warning "Total Possible callbacks $cb\n";
+					alert "Total Possible callbacks $cb\n";
 				} else {
 					warning "Need to check if nested...\n";
 				}
@@ -342,13 +354,14 @@ sub parse_file_line {
 	my $var;
 	my $linear = linearize $file, $line -1;
 	if ($entry_num == 0) {
-		$linear =~ /$CURR_FUNC\s*\((.*)[,\)]/;
+		$linear =~ /\w+\s*\((.*)[,\)]/;
 		panic("ERROR: NO Match[$CURR_FUNC]$linear\n") unless (defined $1);
 		$var = $1;
 	} else {
 		my @vars = split /,/, $linear;
 		$vars[$#vars] =~ s/\).*//;
 		panic("ERROR: NO Match: $linear\n") unless ($#vars > -1 or $entry_num > $#vars);
+		$vars[$entry_num] =~ s/\s+//g;
 		$var = $vars[$entry_num];
 	}
 	trace "$line>> |$var| $linear \n";
