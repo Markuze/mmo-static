@@ -70,8 +70,16 @@ sub verbose {
 
 sub panic {
 	#print BOLD, RED, "@_", RESET;
-	alert(RED, @_);
+	error(RED, @_);
 	die "Error encountered\n";
+}
+
+sub error {
+	$FH = *STDOUT unless defined $FH;
+	my $prfx = dirname $CURR_FILE;
+	$prfx = "$TID: $prfx) $CURR_FUNC:\t";
+	print $FH BOLD, ON_WHITE, RED, $prfx, @_, RESET;
+	print BOLD, ON_WHITE, RED, $prfx, @_, RESET;
 }
 
 sub alert {
@@ -101,10 +109,11 @@ sub get_param_idx {
 		my @vars = split /,/, $str;
 		$i = 0;
 		foreach (@vars) {
+			verbose ("$_\n");
 			last if /$match/;
 			$i++
 		}
-		warning "entry: $i\n";
+		panic "entry: $i ($str)-($match)\n" unless defined $1;
 	} else {
 		panic "ERROR: cant parse for idx: $str\n";
 	}
@@ -116,7 +125,7 @@ sub collect_cb {
 	my $callback_count = 0;
 	$struct{$struct} = undef;
 
-	alert "No Such File:$file\n" and return 0 unless -e $file;
+	error "No Such File:$file\n" and return 0 unless -e $file;
 
 	#verbose "pahole -C $struct -EAa $file\n";
 	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
@@ -156,18 +165,18 @@ sub linearize {
 	my $tmp = $line;
 	until (${$file}[$tmp] =~ /;|{/) {
 		$tmp++;
-		panic ("$$file[$line]\n") if $tmp > $#{$file};
+		panic ("END OF FILE: $$file[$line] ($tmp)\n") if $tmp > $#{$file};
 		$str = ${$file}[$tmp];
 		$str =~ s/^\s+//;
 		$linear.= $str;
 	}
-	until (${$file}[$line -1] =~ /[{};]|^#|\*\//) {
+	until (${$file}[$line -1] =~ /[{};]|^#|\*\// or ${$file}[$line] =~ /$CURR_FUNC/) {
 		$line--;
 		$str = ${$file}[$line];
 		$str =~ s/^\s+//;
 		$linear = $str.$linear;
 	}
-	#verbose "$linear\n";
+	verbose "linearise: $linear\n";
 	return $linear;
 }
 
@@ -203,7 +212,7 @@ sub cscope_recurse {
 	# 3. Do handle mapping
 
 	$field = undef if ($match eq $field);
-
+	warning "No callers for $CURR_FUNC!!!" unless ($#cscope > -1);
 	for (@cscope) {
 		my @line = split /\s/, $_;
 		my $cfile = $CURR_FILE;
@@ -240,8 +249,13 @@ sub handle_declaration {
 			alert "Total Possible callbacks $cb\n";
 		}
 	} elsif ($param =~ /\->/) {
-		warning "NO support mapped fields ($param)\n";
-		#cscope_recurse $file, $str, $match, $field;
+		warning "mapped fields ($param)\n";
+		verbose "$str, $match, $field;\n";
+		if ($$file[$line] =~ /=\s*(.*);/) {
+			warning "Handle assignment... $1";
+		} else {
+			cscope_recurse $file, $str, $match, $field;
+		}
 	} else {
 		if ($$file[$line] =~ /$match\s*=|$match.*;/) {
 			warning "Direct Map: $$file[$line]\n";
@@ -275,7 +289,7 @@ sub get_definition {
 	my $type = undef;
 	my $match = $param;
 
-	panic("$CURR_FILE: $line\n") unless defined $param;
+	panic("ERROR: Param not defined: $CURR_FILE: $line\n") unless defined $param;
 	$match =~ /&*(\w+)\W*/;
 	$match = $1; #if defined $1;
 	$match = $param unless defined $match;
@@ -301,6 +315,11 @@ sub get_definition {
 			$line--;
                 }
 
+		if ($$file[$line] =~ /\s+$match\s*=/) {
+			trace "$line ]] $$file[$line]\n";
+			$type = $$file[$line];
+		}
+
 		if ($$file[$line] =~ /\s+$field\s*=/) {
 			trace "$line ]] $$file[$line]\n";
 			$type = $$file[$line];
@@ -320,14 +339,21 @@ sub parse_file_line {
 	$entry_num = 1 unless defined $entry_num; # second param
 	$dir_entry = 3 unless defined $dir_entry; # forth param
 
+	my $var;
 	my $linear = linearize $file, $line -1;
-	my @vars = split /,/, $linear;
-	$vars[$#vars] =~ s/\).*//;
-
-	panic("$linear\n") unless ($#vars > -1);
-	trace "$line>> |$vars[$entry_num]| $linear \n";
+	if ($entry_num == 0) {
+		$linear =~ /$CURR_FUNC\s*\((.*)[,\)]/;
+		panic("ERROR: NO Match[$CURR_FUNC]$linear\n") unless (defined $1);
+		$var = $1;
+	} else {
+		my @vars = split /,/, $linear;
+		$vars[$#vars] =~ s/\).*//;
+		panic("ERROR: NO Match: $linear\n") unless ($#vars > -1 or $entry_num > $#vars);
+		$var = $vars[$entry_num];
+	}
+	trace "$line>> |$var| $linear \n";
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
-	get_definition $file, $line -1, $vars[$entry_num], $field;
+	get_definition $file, $line -1, $var, $field;
 }
 
 sub start_parsing {
