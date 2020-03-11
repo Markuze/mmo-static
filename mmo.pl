@@ -102,14 +102,15 @@ sub get_next {
 
 sub get_param_idx {
 	my ($str, $match) = @_;
+	verbose ("get_idx: $str|$match|\n");
 	$str =~ /$CURR_FUNC\((.*)\)\{/;
 	my $i = 2;
 	if (defined $1) {
-		verbose "$1 ($match)\n";
-		my @vars = split /,/, $str;
+		verbose "##$1|$match|\n";
+		my @vars = split /,/, $1;
 		$i = 0;
 		foreach (@vars) {
-			verbose ("$_\n");
+			verbose ("#$_\n");
 			last if /$match/;
 			$i++
 		}
@@ -130,8 +131,24 @@ sub collect_cb {
 	#verbose "pahole -C $struct -EAa $file\n";
 	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
 	if (defined $field) {
-		my @def = grep (/\*\s*$field\w/, @out);
-		verbose "@def";
+		my @def = grep (/\*\s*$field\W/, @out);
+		error "No such field\n" unless $#def > -1;
+		for (@def) {
+			chomp;
+			verbose "Field: [$field]:$_ \n";
+			if (/^\s*struct\s+(\w+)\s+\*+/) {
+				verbose "Field: $1\n";
+				return collect_cb("${prfx}$struct->", $1, $file);
+			} else {
+				warning "Find assignment: $_\n";
+				return 0;
+			}
+		}
+		alert ("No match!!: $field\n");
+		for (@def) {
+			chomp;
+			warning "$_\n";
+		}
 		return 0;
 	}
 
@@ -259,9 +276,52 @@ sub handle_declaration {
 		warning "mapped fields ($param)\n";
 		verbose "$str|$match|$field;\n";
 		if ($$file[$line] =~ /=\s*(.*);/) {
-			warning "Handle assignment... $1";
+			warning "Handle assignment... $1\n";
+			#TODO: make this a func
+			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
+				my $struct = $1;
+				my $mapped_field;
+				$mapped_field = $field unless ($match eq $field);
+				%struct = ();
+				my $cb = collect_cb("",$struct, $name, $mapped_field);
+				if ($cb > 0) {
+					alert "Total Possible callbacks $cb\n";
+				} else {
+					warning "Need to check if nested...\n";
+				}
+				if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
+					alert "HEAP mapped!!!\n";
+					#pqi_map_single
+				} else {
+					warning "SLUB entry\n";
+				}
+			} else {
+				warning "Miss: $$file[$line]\n";
+			}
+
 		} elsif ($$file[$line] =~ /$match\s*[\s\w,\*]*;/) {
 			warning "Handle declaration: $str\n";
+			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
+				my $struct = $1;
+				my $mapped_field;
+				$mapped_field = $field unless ($match eq $field);
+				%struct = ();
+				my $cb = collect_cb("",$struct, $name, $mapped_field);
+				if ($cb > 0) {
+					alert "Total Possible callbacks $cb\n";
+				} else {
+					warning "Need to check if nested...\n";
+				}
+				if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
+					alert "HEAP mapped!!!\n";
+					#pqi_map_single
+				} else {
+					warning "SLUB entry\n";
+				}
+			} else {
+				warning "Miss: $$file[$line]\n";
+			}
+
 		} else {
 			warning "recurse...\n";
 			cscope_recurse $file, $str, $match, $field;
@@ -354,9 +414,10 @@ sub parse_file_line {
 	my $var;
 	my $linear = linearize $file, $line -1;
 	if ($entry_num == 0) {
-		$linear =~ /\w+\s*\((.*)[,\)]/;
+		$linear =~ /\w+\s*\((.*)\)/;
 		panic("ERROR: NO Match[$CURR_FUNC]$linear\n") unless (defined $1);
-		$var = $1;
+		my @vars = split /,/, $1;
+		$var = $vars[0];
 	} else {
 		my @vars = split /,/, $linear;
 		$vars[$#vars] =~ s/\).*//;
