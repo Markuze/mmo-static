@@ -132,24 +132,32 @@ sub collect_cb {
 	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
 	if (defined $field) {
 		my @def = grep (/\*\s*$field\W/, @out);
-		error "No such field\n" unless $#def > -1;
-		for (@def) {
-			chomp;
-			verbose "Field: [$field]:$_ \n";
-			if (/^\s*struct\s+(\w+)\s+\*+/) {
-				verbose "Field: $1\n";
-				return collect_cb("${prfx}$struct->", $1, $file);
+		if ($#def > -1) {
+			for (@def) {
+				chomp;
+				verbose "Field: [$field]:$_ \n";
+				if (/^\s*struct\s+(\w+)\s+\*+/) {
+					verbose "Field: $1\n";
+					return collect_cb("${prfx}$struct->", $1, $file);
+				} else {
+					warning "Find assignment: $_\n";
+					return 0;
+				}
+			}
+			alert ("No match!!: $field\n");
+			for (@def) {
+				chomp;
+				warning "$_\n";
+			}
+			return 0;
+		} else {
+			@def = grep (/$field\[/, @out);
+			if ($#def > -1) {
+				error "No such field: $field in $struct\n";
 			} else {
-				warning "Find assignment: $_\n";
-				return 0;
+				verbose "mapping of $field includes $struct\n";
 			}
 		}
-		alert ("No match!!: $field\n");
-		for (@def) {
-			chomp;
-			warning "$_\n";
-		}
-		return 0;
 	}
 
 	#direct callbacks
