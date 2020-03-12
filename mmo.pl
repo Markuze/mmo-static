@@ -126,7 +126,8 @@ sub collect_cb {
 	my $callback_count = 0;
 	$struct{$struct} = undef;
 
-	error "No Such File:$file\n" and return 0 unless -e $file;
+	#error "No Such File:$file\n" and
+	return 0 unless -e $file;
 
 	#verbose "pahole -C $struct -EAa $file\n";
 	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
@@ -234,10 +235,10 @@ sub cscope_recurse {
 	my ($file, $str, $match, $field) = @_;
 	my $idx = get_param_idx($str, $match);
 	my @cscope = qx(cscope -dL -3 $CURR_FUNC);
-	###
-	# 1. Read file if different from curr
-	# 2. handle case where loc is neq 2
-	# 3. Do handle mapping
+
+	#TODO:
+	# 1. False match - static funcs (filter).
+	# 2. Follow func ptrs (e.g., netdev_ops)
 
 	$field = undef if ($match eq $field);
 	warning "Found NO callers for $CURR_FUNC!!!\n" unless ($#cscope > -1);
@@ -445,7 +446,7 @@ sub start_parsing {
 
 	while (defined $file) {
 		$CURR_FILE = delete ${$file}{'file'};
-		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
+#		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
 			#$file = get_next() and next if $CURR_FILE =~ /staging/;
 			new_trace "$CURR_FILE\n";
 			tie my @file, 'Tie::File', $CURR_FILE;
@@ -455,7 +456,7 @@ sub start_parsing {
 				$CURR_FUNC = ${$file}{$_};
 				new_trace "$CURR_FUNC: $_\n";
 				parse_file_line \@file, $_;
-			}
+#			}
 		}
 		$file = get_next();
 	};
