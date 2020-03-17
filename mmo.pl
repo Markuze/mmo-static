@@ -28,7 +28,7 @@ my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my $CURR_FILE = undef; #per thread variable
 my $CURR_FUNC = undef; #per thread variable
-my @CURR_STACK = ();
+my $CURR_STACK = ();
 my %struct = ();
 ####################### INIT #####################
 my %opts = ();
@@ -54,11 +54,13 @@ sub usage {
 sub new_trace {
 	$FH = *STDOUT unless defined $FH;;
 	print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "@_", RESET;
+	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
 }
 
 sub trace {
 	$FH = *STDOUT unless defined $FH;;
 	print $FH ITALIC, BRIGHT_BLUE, "@_", RESET;
+	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
 }
 
 sub verbose {
@@ -78,16 +80,17 @@ sub error {
 	$FH = *STDOUT unless defined $FH;
 	my $prfx = dirname $CURR_FILE;
 	$prfx = "$TID: $prfx) $CURR_FUNC:\t";
-	print $FH BOLD, ON_WHITE, RED, $prfx, @_, RESET;
-	print BOLD, ON_WHITE, RED, $prfx, @_, RESET;
+	print $FH BOLD, RED, $prfx, @_, RESET;
+	print BOLD, RED, $prfx, @_, RESET;
 }
 
 sub alert {
 	$FH = *STDOUT unless defined $FH;
 	my $prfx = dirname $CURR_FILE;
 	$prfx = "$TID: $prfx) $CURR_FUNC:\t";
-	print $FH BOLD, BRIGHT_RED, $prfx, @_, RESET;
-	print BOLD, BRIGHT_RED, $prfx, @_, RESET;
+	print $FH BOLD, MAGENTA, $prfx, @_, RESET;
+	print BOLD, MAGENTA, $prfx, @_, RESET;
+	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
 }
 
 sub warning {
@@ -103,7 +106,7 @@ sub get_next {
 sub get_param_idx {
 	my ($str, $match) = @_;
 	verbose ("get_idx: $str|$match|\n");
-	$str =~ /$CURR_FUNC\((.*)\)\{/;
+	$str =~ /$CURR_FUNC\s*\((.*)\)\{/;
 	my $i = 2;
 	if (defined $1) {
 		verbose "##$1|$match|\n";
@@ -219,6 +222,7 @@ sub cscope_add_entry {
 		push @cscope_lines, \%rec;
 	}
 	lock %{$cscope_lines{"$file"}};
+	## File{Line} = Current function
 	$cscope_lines{"$file"}{$l} = ${$line}[1] unless exists $cscope_lines{"$file"}{$l};
 }
 
@@ -243,19 +247,28 @@ sub cscope_recurse {
 	$field = undef if ($match eq $field);
 	warning "Found NO callers for $CURR_FUNC!!!\n" unless ($#cscope > -1);
 	for (@cscope) {
+		chomp;
 		my @line = split /\s/, $_;
 		my $cfile = $CURR_FILE;
 		my $cfunc = $CURR_FUNC;
 
 		trace "Recursing to $_\n";
+		if ($cfunc eq $line[1]) {
+			warning "Endless Recursion... $CURR_FUNC -> ($_)\n";
+			next;
+		}
 		$CURR_FUNC = $line[1];
 		if ($line[0] eq $CURR_FILE) {
 			parse_file_line($file, $line[2], $field, $idx);
 		} else {
-			$CURR_FILE = $line[0];
-			tie my @file_text, 'Tie::File', $line[0];
-			parse_file_line(\@file_text, $line[2], $field, $idx);
-			$CURR_FILE = $cfile;
+			unless ($str =~ /^\s*static/) {
+				$CURR_FILE = $line[0];
+				tie my @file_text, 'Tie::File', $line[0];
+				parse_file_line(\@file_text, $line[2], $field, $idx);
+				$CURR_FILE = $cfile;
+			} else {
+				warning "False Positive cscope match: $_\n";
+			}
 		}
 		$CURR_FUNC = $cfunc;
 	}
@@ -358,7 +371,6 @@ sub handle_declaration {
 			}
 
 		} else {
-			warning "Dev in progress recurse [$CURR_FUNC]\n";
 			cscope_recurse $file, $str, $match, $field;
 		}
 	}
@@ -453,7 +465,10 @@ sub start_parsing {
 
 			foreach (keys %{$file}) {
 			#foreach (keys %{$cscope_lines{"$name"}}) {
+				my @trace : shared = ();
 				$CURR_FUNC = ${$file}{$_};
+				${$file}{$_} = \@trace;
+				$CURR_STACK = \@trace;
 				new_trace "$CURR_FUNC: $_\n";
 				parse_file_line \@file, $_;
 #			}
@@ -503,4 +518,17 @@ for (@threads) {
 	$_->join();
 }
 printf "Done waiting...\n";
+
+foreach my $file (keys %cscope_lines) {
+	foreach my $line (keys %{$cscope_lines{$file}}) {
+		my $trace = $cscope_lines{$file}{$line};
+
+		my $ref = ref $trace;
+		print WHITE, "$file:$line <$ref>\n", RESET;
+#	while (@{$trace}) {
+#		my $str = pop @{$trace};
+#		print GREEN, $str ,RESET;
+#	}
+	}
+}
 #start_parsing;
