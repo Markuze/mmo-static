@@ -274,6 +274,30 @@ sub cscope_recurse {
 	}
 }
 
+sub identify_type {
+	my ($file, $line, $match, $field) = @_;
+	if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
+		my $struct = $1;
+		my $mapped_field;
+		$mapped_field = $field unless ($match eq $field);
+		%struct = ();
+		my $cb = collect_cb("",$struct, $name, $mapped_field);
+		if ($cb > 0) {
+			alert "Total Possible callbacks $cb\n";
+		} else {
+			warning "Need to check if nested...\n";
+		}
+		if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
+			alert "HEAP mapped!!!\n";
+			#pqi_map_single
+		} else {
+			warning "SLUB entry\n";
+		}
+	} else {
+		warning "Miss: $$file[$line]\n";
+	}
+}
+
 sub handle_declaration {
 	my ($file, $line, $param, $match, $field, $type) = @_;
 	my $name = $CURR_FILE;
@@ -299,51 +323,11 @@ sub handle_declaration {
 		verbose "$str|$match|$field;\n";
 		if ($$file[$line] =~ /=\s*(.*);/) {
 			warning "Handle assignment... $1\n";
-			#TODO: make this a func
-			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
-				my $struct = $1;
-				my $mapped_field;
-				$mapped_field = $field unless ($match eq $field);
-				%struct = ();
-				my $cb = collect_cb("",$struct, $name, $mapped_field);
-				if ($cb > 0) {
-					alert "Total Possible callbacks $cb\n";
-				} else {
-					warning "Need to check if nested...\n";
-				}
-				if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
-					alert "HEAP mapped!!!\n";
-					#pqi_map_single
-				} else {
-					warning "SLUB entry\n";
-				}
-			} else {
-				warning "Miss: $$file[$line]\n";
-			}
+			identify_risk $file, $line, $match, $field;
 
 		} elsif ($$file[$line] =~ /$match\s*[\s\w,\*]*;/) {
 			warning "Handle declaration: $str\n";
-			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
-				my $struct = $1;
-				my $mapped_field;
-				$mapped_field = $field unless ($match eq $field);
-				%struct = ();
-				my $cb = collect_cb("",$struct, $name, $mapped_field);
-				if ($cb > 0) {
-					alert "Total Possible callbacks $cb\n";
-				} else {
-					warning "Need to check if nested...\n";
-				}
-				if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
-					alert "HEAP mapped!!!\n";
-					#pqi_map_single
-				} else {
-					warning "SLUB entry\n";
-				}
-			} else {
-				warning "Miss: $$file[$line]\n";
-			}
-
+			identify_risk $file, $line, $match, $field;
 		} else {
 			warning "recurse...\n";
 			cscope_recurse $file, $str, $match, $field;
@@ -351,25 +335,7 @@ sub handle_declaration {
 	} else {
 		if ($$file[$line] =~ /$match\s*=|$match.*;/) {
 			warning "Direct Map: $$file[$line]\n";
-			if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
-				my $struct = $1;
-				my $mapped_field;
-				$mapped_field = $field unless ($match eq $field);
-				%struct = ();
-				my $cb = collect_cb("",$struct, $name, $mapped_field);
-				if ($cb > 0) {
-					alert "Total Possible callbacks $cb\n";
-				} else {
-					warning "Need to check if nested...\n";
-				}
-				if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
-					alert "HEAP mapped!!!\n";
-					#pqi_map_single
-				} else {
-					warning "SLUB entry\n";
-				}
-			}
-
+			identify_risk $file, $line, $match, $field;
 		} else {
 			cscope_recurse $file, $str, $match, $field;
 		}
