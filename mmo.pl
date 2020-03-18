@@ -17,6 +17,7 @@ use File::Spec::Functions;
 use Cwd;
 
 ##################### GLOBALS ##########################
+my $RECURSION_DEPTH_LIMIT = 8;
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
@@ -28,6 +29,8 @@ my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my $CURR_FILE = undef; #per thread variable
 my $CURR_FUNC = undef; #per thread variable
+my $CURR_DEPTH = 0;
+my $CALLEE = undef; #per thread variable
 my $CURR_STACK = ();
 my %struct = ();
 ####################### INIT #####################
@@ -103,25 +106,47 @@ sub get_next {
 	return pop @cscope_lines;
 }
 
+sub extract_call_only {
+	my ($str, $func) = @_;
+	my $out = "";
+	my $i = 0;
+
+	verbose "extract $str\n";
+	$str =~ /$func\s*(\(.*\))/;
+	panic "ERROR: WTF $str:$func\n" unless defined $1;
+	verbose "extract: $1\n";
+	$str = $1;
+
+	foreach (split //, $str) {
+		$i++ if /\(/;
+		$i-- if /\)/;
+		panic "ERROR: $str\n" if $i < 0;
+		$out .= "$_";
+		last if $i == 0;
+	}
+	verbose "out: $out\n";
+	panic "ERROR: $str\n" if $i != 0;
+
+	#$out =~ s/\(\s*\w+\s*\*\)//g; #Squash casting e.g., (void *)
+	#$out =~ s/sizeof\s*\(.*?\)/sizeof/g;
+
+	return $out;
+}
+
 sub get_param_idx {
 	my ($str, $match) = @_;
 	verbose ("get_idx: $str|$match|\n");
 
-	$str =~ /$CURR_FUNC\s*\((.*)\)\{/;
-	my $i = 2;
-	if (defined $1) {
-		verbose "##$1|$match|\n";
-		my @vars = split /,/, $1;
-		$i = 0;
-		foreach (@vars) {
-			verbose ("#$_\n");
-			last if /$match/;
-			$i++
-		}
-		panic "entry: $i ($str)-($match)\n" unless defined $1;
-	} else {
-		panic "ERROR: cant parse for idx: $str\n";
+	#$str = extract_call_only $str, $CURR_FUNC;
+	verbose "##$str|$match|\n";
+	my @vars = split /,/, $str;
+	my $i = 0;
+	foreach (@vars) {
+		verbose ("#$_\n");
+		last if /$match/;
+		$i++
 	}
+	panic "HEmm... $str" if ($#vars == -1 or $i > $#vars);
 	return $i;
 }
 #################### FUNCTIONS ####################
@@ -189,7 +214,7 @@ sub collect_cb {
 }
 
 sub linearize {
-	my ($file, $line) = @_;
+	my ($file, $line, $func) = @_;
 	my $linear;
 	my $str = ${$file}[$line];
 	$str =~ s/^\s+//;
@@ -218,13 +243,6 @@ sub linearize {
 		$str =~ s/^\s+//;
 		$linear = $str.$linear;
 	}
-	verbose "lin\t: $linear\n";
-
-	#$linear =~ s/([\(,])\s*\(\s*\w+\s*\\*\)/$1/;
-	$linear =~ s/\(\s*\w+\s*\*\)//g;
-	$linear =~ s/sizeof\s*\(.*\)//g;
-
-	verbose "lin-out\t: $linear\n";
 	return $linear;
 }
 
@@ -262,18 +280,23 @@ sub cscope_recurse {
 
 	$field = undef if ($match eq $field);
 	warning "Found NO callers for $CURR_FUNC!!!\n" unless ($#cscope > -1);
+	$CURR_DEPTH++;
+	panic "Recursionlimit exceeded: $CURR_DEPTH\n" if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	for (@cscope) {
 		chomp;
 		my @line = split /\s/, $_;
 		my $cfile = $CURR_FILE;
 		my $cfunc = $CURR_FUNC;
+		my $callee = $CALLEE;
 
 		trace "Recursing to $_\n";
 		if ($cfunc eq $line[1]) {
 			warning "Endless Recursion... $CURR_FUNC -> ($_)\n";
 			next;
 		}
+		$CALLEE = $CURR_FUNC;
 		$CURR_FUNC = $line[1];
+
 		if ($line[0] eq $CURR_FILE) {
 			parse_file_line($file, $line[2], $field, $idx);
 		} else {
@@ -287,7 +310,9 @@ sub cscope_recurse {
 			}
 		}
 		$CURR_FUNC = $cfunc;
+		$CALLEE = $callee;
 	}
+	$CURR_DEPTH--;
 }
 
 sub identify_risk {
@@ -318,46 +343,52 @@ sub handle_declaration {
 	my ($file, $line, $param, $match, $field, $type) = @_;
 	my $name = $CURR_FILE;
 	my $str = linearize $file, $line;
-	$name =~ s/\.c/\.o/;
 
-	trace "$line ]>($param [$match][$field]) $str\n";
-	if ($param =~ /&\w+/) {
-		warning "High Risk\n";
-		if ($str =~ /struct\s+(\w+)\s+\**\s*$match/) {
-			my $struct = $1;
-			trace ")>struct $struct\n";
-			%struct = ();
-			my $cb = collect_cb("",$struct, $name);
-			if ($cb > 0) {
-				alert "Total Possible callbacks $cb\n";
+	if ($str =~ /$CURR_FUNC/) {
+		#$str = extract_call_only $str, $CURR_FUNC;
+		warning "Recursing on $str\n";
+		cscope_recurse $file, $str, $match, $field;
+	} else {
+		$name =~ s/\.c/\.o/;
+
+		trace "$line ]>($param [$match][$field]) $str\n";
+		if ($param =~ /&\w+/) {
+			warning "High Risk\n";
+			if ($str =~ /struct\s+(\w+)\s+\**\s*$match/) {
+				my $struct = $1;
+				trace ")>struct $struct\n";
+				%struct = ();
+				my $cb = collect_cb("",$struct, $name);
+				if ($cb > 0) {
+					alert "Total Possible callbacks $cb\n";
+				} else {
+					warning "Need to check if nested...\n";
+				}
+			}
+		} elsif ($param =~ /\->/) {
+			warning "mapped fields ($param)\n";
+			verbose "$str|$match|$field;\n";
+			if ($str =~ /=\s*(.*);/) {
+				warning "Handle assignment... $1\n";
+				identify_risk $str, $match, $field, $name;
+
+			} elsif ($str =~ /$match\s*[\s\w,\*]*;/) {
+				warning "Handle declaration: $str\n";
+				identify_risk $str, $match, $field, $name;
 			} else {
-				warning "Need to check if nested...\n";
+				warning "Stopped on $str\n";
+				warning "$file, $str, $match, $field\n";
+			}
+		} else {
+			if ($str =~ /$match\s*=|$match.*;/) {
+				warning "Direct Map: $str\n";
+				identify_risk $str, $match, $field, $name;
+			} else {
+				warning "Stopped on $str\n";
+				warning "$file, $str, $match, $field\n";
 			}
 		}
-	} elsif ($param =~ /\->/) {
-		warning "mapped fields ($param)\n";
-		verbose "$str|$match|$field;\n";
-		if ($str =~ /=\s*(.*);/) {
-			warning "Handle assignment... $1\n";
-			identify_risk $str, $match, $field, $name;
-
-		} elsif ($str =~ /$match\s*[\s\w,\*]*;/) {
-			warning "Handle declaration: $str\n";
-			identify_risk $str, $match, $field, $name;
-		} else {
-			warning "Recursing on $str\n";
-			cscope_recurse $file, $str, $match, $field;
-		}
-	} else {
-		if ($str =~ /$match\s*=|$match.*;/) {
-			warning "Direct Map: $str\n";
-			identify_risk $str, $match, $field, $name;
-		} else {
-			warning "Recursing on $str\n";
-			cscope_recurse $file, $str, $match, $field;
-		}
 	}
-
 }
 
 sub get_definition {
@@ -417,10 +448,12 @@ sub parse_file_line {
 
 	my $var;
 	my $linear = linearize $file, $line -1;
+	verbose "begin: $linear\n";
+	$linear = extract_call_only $linear, $CALLEE;
+
 	if ($entry_num == 0) {
-		$linear =~ /\w+\s*\((.*)\)/;
-		panic("ERROR: NO Match[$CURR_FUNC]$linear\n") unless (defined $1);
-		my @vars = split /,/, $1;
+		my @vars = split /,/, $linear;
+		$vars[0] =~ s/\(\s*//;
 		$var = $vars[0];
 	} else {
 		my @vars = split /,/, $linear;
@@ -451,6 +484,8 @@ sub start_parsing {
 			#foreach (keys %{$cscope_lines{"$name"}}) {
 				my @trace : shared = ();
 				$CURR_FUNC = ${$file}{$_};
+				$CALLEE = 'map_single';#TODO: Fix to match actual root func
+				$CURR_DEPTH = 0;
 				${$file}{$_} = \@trace;
 				$CURR_STACK = \@trace;
 				new_trace "$CURR_FUNC: $_\n";
