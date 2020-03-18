@@ -3,12 +3,12 @@
 # Alloc, definition local.
 # Function call ...
 #
-# 0   : put report: use Hash.
-# 1   : Handle case of $CURR_FUNC == void
+# 0   : Handle case of $CURR_FUNC == void
 # 0.1 : Annon structs (adapter_t)
 # 0.2 : Pahole -i <class> - when mapped structed is in a bigger struct.
-# 1.  : Mapped fields
 # 2.  : determine assignment : slub, heap, struct.
-# 3.  : skbs
+# 2.1 : switch variable in assignment.
+# 3.  : skbs (build skb)
+# 4.  : Validate results
 
 #consider hacking slub (https://lwn.net/Articles/229984/) to force mapping specific addresses.
