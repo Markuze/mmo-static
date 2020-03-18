@@ -106,6 +106,7 @@ sub get_next {
 sub get_param_idx {
 	my ($str, $match) = @_;
 	verbose ("get_idx: $str|$match|\n");
+
 	$str =~ /$CURR_FUNC\s*\((.*)\)\{/;
 	my $i = 2;
 	if (defined $1) {
@@ -204,11 +205,26 @@ sub linearize {
 	}
 	until (${$file}[$line -1] =~ /[{};]|^#|\*\// or ${$file}[$line] =~ /$CURR_FUNC/) {
 		$line--;
+		panic ("Reached Line 0: $linear\n") if ($line <= 0);
 		$str = ${$file}[$line];
 		$str =~ s/^\s+//;
 		$linear = $str.$linear;
 	}
-	verbose "linearise: $linear\n";
+	#get the whole declaration
+	if (${$file}[$line] =~ /^$CURR_FUNC/) {
+		$line--;
+		panic ("Reached Line 0: $linear\n") if ($line <= 0);
+		$str = ${$file}[$line];
+		$str =~ s/^\s+//;
+		$linear = $str.$linear;
+	}
+	verbose "lin\t: $linear\n";
+
+	#$linear =~ s/([\(,])\s*\(\s*\w+\s*\\*\)/$1/;
+	$linear =~ s/\(\s*\w+\s*\*\)//g;
+	$linear =~ s/sizeof\s*\(.*\)//g;
+
+	verbose "lin-out\t: $linear\n";
 	return $linear;
 }
 
@@ -274,9 +290,9 @@ sub cscope_recurse {
 	}
 }
 
-sub identify_type {
-	my ($file, $line, $match, $field) = @_;
-	if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
+sub identify_risk {
+	my ($str, $match, $field, $name) = @_;
+	if ($str =~ /struct\s+(\w+)\s+\**\s*$match/) {
 		my $struct = $1;
 		my $mapped_field;
 		$mapped_field = $field unless ($match eq $field);
@@ -287,14 +303,14 @@ sub identify_type {
 		} else {
 			warning "Need to check if nested...\n";
 		}
-		if ($$file[$line] =~ /struct\s+(\w+)\s+\s*$match/) {
+		if ($str =~ /struct\s+(\w+)\s+\s*$match/) {
 			alert "HEAP mapped!!!\n";
 			#pqi_map_single
 		} else {
 			warning "SLUB entry\n";
 		}
 	} else {
-		warning "Miss: $$file[$line]\n";
+		warning "Miss: $str\n";
 	}
 }
 
@@ -307,7 +323,7 @@ sub handle_declaration {
 	trace "$line ]>($param [$match][$field]) $str\n";
 	if ($param =~ /&\w+/) {
 		warning "High Risk\n";
-		if ($$file[$line] =~ /struct\s+(\w+)\s+\**\s*$match/) {
+		if ($str =~ /struct\s+(\w+)\s+\**\s*$match/) {
 			my $struct = $1;
 			trace ")>struct $struct\n";
 			%struct = ();
@@ -321,22 +337,23 @@ sub handle_declaration {
 	} elsif ($param =~ /\->/) {
 		warning "mapped fields ($param)\n";
 		verbose "$str|$match|$field;\n";
-		if ($$file[$line] =~ /=\s*(.*);/) {
+		if ($str =~ /=\s*(.*);/) {
 			warning "Handle assignment... $1\n";
-			identify_risk $file, $line, $match, $field;
+			identify_risk $str, $match, $field, $name;
 
-		} elsif ($$file[$line] =~ /$match\s*[\s\w,\*]*;/) {
+		} elsif ($str =~ /$match\s*[\s\w,\*]*;/) {
 			warning "Handle declaration: $str\n";
-			identify_risk $file, $line, $match, $field;
+			identify_risk $str, $match, $field, $name;
 		} else {
-			warning "recurse...\n";
+			warning "Recursing on $str\n";
 			cscope_recurse $file, $str, $match, $field;
 		}
 	} else {
-		if ($$file[$line] =~ /$match\s*=|$match.*;/) {
-			warning "Direct Map: $$file[$line]\n";
-			identify_risk $file, $line, $match, $field;
+		if ($str =~ /$match\s*=|$match.*;/) {
+			warning "Direct Map: $str\n";
+			identify_risk $str, $match, $field, $name;
 		} else {
+			warning "Recursing on $str\n";
 			cscope_recurse $file, $str, $match, $field;
 		}
 	}
@@ -409,6 +426,7 @@ sub parse_file_line {
 		my @vars = split /,/, $linear;
 		$vars[$#vars] =~ s/\).*//;
 		panic("ERROR: NO Match: $linear\n") unless ($#vars > -1 or $entry_num > $#vars);
+		panic("ERROR: Undefined: $linear [$entry_num/$#vars]\n") unless (defined $vars[$entry_num]);
 		$vars[$entry_num] =~ s/\s+//g;
 		$var = $vars[$entry_num];
 	}
