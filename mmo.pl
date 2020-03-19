@@ -17,7 +17,7 @@ use File::Spec::Functions;
 use Cwd;
 
 ##################### GLOBALS ##########################
-my $RECURSION_DEPTH_LIMIT = 8;
+my $RECURSION_DEPTH_LIMIT = 16;
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
@@ -27,11 +27,14 @@ my $TID;
 
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
+
 my $CURR_FILE = undef; #per thread variable
 my $CURR_FUNC = undef; #per thread variable
 my $CURR_DEPTH = 0;
+my @REC_HEAP = ();
+
 my $CALLEE = undef; #per thread variable
-my $CURR_STACK = ();
+my $CURR_STACK = undef;
 my %struct = ();
 ####################### INIT #####################
 my %opts = ();
@@ -124,20 +127,21 @@ sub extract_call_only {
 		$out .= "$_";
 		last if $i == 0;
 	}
-	verbose "out: $out\n";
 	panic "ERROR: $str\n" if $i != 0;
 
-	#$out =~ s/\(\s*\w+\s*\*\)//g; #Squash casting e.g., (void *)
+	$out =~ s/(\(\s*\w+\s*\*\))//g; #Squash casting e.g., (void *)
+	verbose "Removed $1\n" if defined $1;
 	#$out =~ s/sizeof\s*\(.*?\)/sizeof/g;
 
+	verbose "out: $out\n";
 	return $out;
 }
 
 sub get_param_idx {
-	my ($str, $match) = @_;
-	verbose ("get_idx: $str|$match|\n");
+	my ($string, $match) = @_;
+	my $str = extract_call_only $string, $CURR_FUNC;
 
-	#$str = extract_call_only $str, $CURR_FUNC;
+	verbose ("get_idx: $string| $str|$match|\n");
 	verbose "##$str|$match|\n";
 	my @vars = split /,/, $str;
 	my $i = 0;
@@ -279,7 +283,7 @@ sub cscope_recurse {
 	# 2. Follow func ptrs (e.g., netdev_ops)
 
 	$field = undef if ($match eq $field);
-	warning "Found NO callers for $CURR_FUNC!!!\n" unless ($#cscope > -1);
+	warning "Found NO callers for $CURR_FUNC!!!\n" and return unless ($#cscope > -1);
 	$CURR_DEPTH++;
 	panic "Recursionlimit exceeded: $CURR_DEPTH\n" if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	for (@cscope) {
@@ -289,11 +293,16 @@ sub cscope_recurse {
 		my $cfunc = $CURR_FUNC;
 		my $callee = $CALLEE;
 
-		trace "Recursing to $_\n";
-		if ($cfunc eq $line[1]) {
+		trace "[$CURR_DEPTH]Recursing to $_\n";
+		error ">$_?\n" and next unless /$CURR_FUNC/;
+
+		my @endless_check = grep /^$line[1]$/, @REC_HEAP;
+		if (@endless_check) {
 			warning "Endless Recursion... $CURR_FUNC -> ($_)\n";
+			verbose "@REC_HEAP\n";
 			next;
 		}
+		push @REC_HEAP, $line[1];
 		$CALLEE = $CURR_FUNC;
 		$CURR_FUNC = $line[1];
 
@@ -309,6 +318,7 @@ sub cscope_recurse {
 				warning "False Positive cscope match: $_\n";
 			}
 		}
+		pop @REC_HEAP;
 		$CURR_FUNC = $cfunc;
 		$CALLEE = $callee;
 	}
@@ -344,10 +354,14 @@ sub handle_declaration {
 	my $name = $CURR_FILE;
 	my $str = linearize $file, $line;
 
-	if ($str =~ /$CURR_FUNC/) {
+	if ($str =~ /$CURR_FUNC\s*\(/) {
 		#$str = extract_call_only $str, $CURR_FUNC;
-		warning "Recursing on $str\n";
-		cscope_recurse $file, $str, $match, $field;
+		unless ($str =~ /typedef/) {
+			warning "Recursing on $str [$CURR_FUNC]\n";
+			cscope_recurse $file, $str, $match, $field;
+		} else {
+			warning "WA cscope issue $str\n";
+		}
 	} else {
 		$name =~ s/\.c/\.o/;
 
