@@ -3,12 +3,14 @@
 # Alloc, definition local.
 # Function call ...
 #
-# 0   : Handle case of $CURR_FUNC == void
 # 0.1 : Annon structs (adapter_t)
 # 0.2 : Pahole -i <class> - when mapped structed is in a bigger struct.
 # 2.  : determine assignment : slub, heap, struct.
 # 2.1 : switch variable in assignment.
-# 3.  : skbs (build skb)
+# 3   : Function pointers.
 # 4.  : Validate results
+# 6.  : map_page? map_sg?
+
+# 5.  : build_skb - Auto High Risk! (validate with dma_unmap?)
 
 #consider hacking slub (https://lwn.net/Articles/229984/) to force mapping specific addresses.

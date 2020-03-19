@@ -294,7 +294,7 @@ sub cscope_recurse {
 		my $callee = $CALLEE;
 
 		trace "[$CURR_DEPTH]Recursing to $_\n";
-		error ">$_?\n" and next unless /$CURR_FUNC/;
+		warning "cscope false positive>$_\n" and next if />$CURR_FUNC/;
 
 		my @endless_check = grep /^$line[1]$/, @REC_HEAP;
 		if (@endless_check) {
@@ -305,6 +305,7 @@ sub cscope_recurse {
 		push @REC_HEAP, $line[1];
 		$CALLEE = $CURR_FUNC;
 		$CURR_FUNC = $line[1];
+		panic "void caller!\n" if ($CURR_FUNC eq "void");
 
 		if ($line[0] eq $CURR_FILE) {
 			parse_file_line($file, $line[2], $field, $idx);
@@ -439,11 +440,17 @@ sub get_definition {
 		if ($$file[$line] =~ /\s+$match\s*=/) {
 			trace "$line ]] $$file[$line]\n";
 			$type = $$file[$line];
+			if ($$file[$line] =~ /build_skb/) {
+				alert "build_skb exposes shared_info\n";
+			}
 		}
 
 		if ($$file[$line] =~ /\s+$field\s*=/) {
 			trace "$line ]] $$file[$line]\n";
 			$type = $$file[$line];
+			if ($$file[$line] =~ /build_skb/) {
+				alert "build_skb exposes shared_info\n";
+			}
 		}
 
 		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
@@ -498,6 +505,7 @@ sub start_parsing {
 			#foreach (keys %{$cscope_lines{"$name"}}) {
 				my @trace : shared = ();
 				$CURR_FUNC = ${$file}{$_};
+				panic "void caller!\n" if ($CURR_FUNC eq "void");
 				$CALLEE = 'map_single';#TODO: Fix to match actual root func
 				$CURR_DEPTH = 0;
 				${$file}{$_} = \@trace;
