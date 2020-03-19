@@ -17,7 +17,7 @@ use File::Spec::Functions;
 use Cwd;
 
 ##################### GLOBALS ##########################
-my $RECURSION_DEPTH_LIMIT = 16;
+my $RECURSION_DEPTH_LIMIT = 8;
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
@@ -281,11 +281,15 @@ sub cscope_recurse {
 	#TODO:
 	# 1. False match - static funcs (filter).
 	# 2. Follow func ptrs (e.g., netdev_ops)
+	unless ($#cscope > -1) {
+		warning "Found NO callers for $CURR_FUNC!!!\n";
+		trace "Found NO callers for $CURR_FUNC!!!\n";
+		return;
+	}
 
 	$field = undef if ($match eq $field);
-	warning "Found NO callers for $CURR_FUNC!!!\n" and return unless ($#cscope > -1);
+	error "Recursionlimit exceeded: $CURR_DEPTH\n" and return if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	$CURR_DEPTH++;
-	panic "Recursionlimit exceeded: $CURR_DEPTH\n" if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	for (@cscope) {
 		chomp;
 		my @line = split /\s/, $_;
@@ -335,18 +339,22 @@ sub identify_risk {
 		%struct = ();
 		my $cb = collect_cb("",$struct, $name, $mapped_field);
 		if ($cb > 0) {
-			alert "Total Possible callbacks $cb\n";
+			trace "Total Possible callbacks $cb\n";
 		} else {
-			warning "Need to check if nested...\n";
+			warning "Need to check if nested/assigned...\n";
+			trace "No callbacks\n";
 		}
 		if ($str =~ /struct\s+(\w+)\s+\s*$match/) {
-			alert "HEAP mapped!!!\n";
+			trace "HEAP mapped!!!\n";
 			#pqi_map_single
 		} else {
-			warning "SLUB entry\n";
+			warning "Collect cb for inner Field\n";#TODO
+			trace "Check Assignment/and Field Type\n";
 		}
+	} elsif ($str =~ /(\w+)\s+\**\s*$match/) {
+		trace "$str\n";
 	} else {
-		warning "Miss: $str\n";
+		alert "Miss: $str\n";
 	}
 }
 
@@ -396,7 +404,7 @@ sub handle_declaration {
 			}
 		} else {
 			if ($str =~ /$match\s*=|$match.*;/) {
-				warning "Direct Map: $str\n";
+				#warning "Direct Map: $str\n";
 				identify_risk $str, $match, $field, $name;
 			} else {
 				warning "Stopped on $str\n";
@@ -442,6 +450,11 @@ sub get_definition {
 			$type = $$file[$line];
 			if ($$file[$line] =~ /build_skb/) {
 				alert "build_skb exposes shared_info\n";
+				trace "build_skb exposes shared_info\n";
+			}
+			if ($$file[$line] =~ /alloc_skb/) {
+				alert "alloc_skb exposes shared_info\n";
+				trace "alloc_skb exposes shared_info\n";
 			}
 		}
 
@@ -450,6 +463,10 @@ sub get_definition {
 			$type = $$file[$line];
 			if ($$file[$line] =~ /build_skb/) {
 				alert "build_skb exposes shared_info\n";
+			}
+			if ($$file[$line] =~ /alloc_skb/) {
+				alert "alloc_skb exposes shared_info\n";
+				trace "alloc_skb exposes shared_info\n";
 			}
 		}
 
@@ -468,9 +485,10 @@ sub parse_file_line {
 	$dir_entry = 3 unless defined $dir_entry; # forth param
 
 	my $var;
-	my $linear = linearize $file, $line -1;
-	verbose "begin: $linear\n";
-	$linear = extract_call_only $linear, $CALLEE;
+	my $str = linearize $file, $line -1;
+	my $linear = extract_call_only $str, $CALLEE;
+
+	verbose "begin: $str: $linear\n";
 
 	if ($entry_num == 0) {
 		my @vars = split /,/, $linear;
@@ -484,7 +502,8 @@ sub parse_file_line {
 		$vars[$entry_num] =~ s/\s+//g;
 		$var = $vars[$entry_num];
 	}
-	trace "$line>> |$var| $linear \n";
+	panic "Is NULL? $str\n" if ($var eq 'NULL');
+	trace "$line>> |$var| $str \n";
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
 	get_definition $file, $line -1, $var, $field;
 }
@@ -512,8 +531,8 @@ sub start_parsing {
 				$CURR_STACK = \@trace;
 				new_trace "$CURR_FUNC: $_\n";
 				parse_file_line \@file, $_;
-#			}
-		}
+			}
+#		}
 		$file = get_next();
 	};
 }
@@ -560,16 +579,22 @@ for (@threads) {
 }
 printf "Done waiting...\n";
 
+my @cb = ();
+my @heap = ();
+my @slab = ();
+my @other = ();
+
 foreach my $file (keys %cscope_lines) {
 	foreach my $line (keys %{$cscope_lines{$file}}) {
 		my $trace = $cscope_lines{$file}{$line};
-
 		my $ref = ref $trace;
+
 		print WHITE, "$file:$line <$ref>\n", RESET;
-#	while (@{$trace}) {
-#		my $str = pop @{$trace};
-#		print GREEN, $str ,RESET;
-#	}
+		error "$file:$line\n" unless ($ref eq 'ARRAY');
+		while (@{$trace}) {
+			my $str = pop @{$trace};
+			print GREEN, $str ,RESET;
+		}
 	}
 }
 #start_parsing;
