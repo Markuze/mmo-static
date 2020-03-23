@@ -118,7 +118,7 @@ sub extract_call_only {
 	verbose "extract $str\n";
 	$str =~ /$func\s*(\(.*\))/;
 	panic "ERROR: WTF $str:$func\n" unless defined $1;
-	verbose "extract: $1\n";
+	#verbose "extract: $1\n";
 	$str = $1;
 
 	foreach (split //, $str) {
@@ -131,7 +131,7 @@ sub extract_call_only {
 	panic "ERROR: $str\n" if $i != 0;
 
 	$out =~ s/(\(\s*\w+\s*\*\))//g; #Squash casting e.g., (void *)
-	verbose "Removed $1\n" if defined $1;
+	#verbose "Removed $1\n" if defined $1;
 	#$out =~ s/sizeof\s*\(.*?\)/sizeof/g;
 
 	verbose "out: $out\n";
@@ -147,7 +147,7 @@ sub get_param_idx {
 	my @vars = split /,/, $str;
 	my $i = 0;
 	foreach (@vars) {
-		verbose ("#$_\n");
+		#verbose ("#$_\n");
 		last if /$match/;
 		$i++
 	}
@@ -218,6 +218,10 @@ sub collect_cb {
 	return $callback_count;
 }
 
+sub linearize_assignment {
+	my ($file, $line, $func) = @_;
+}
+
 sub linearize {
 	my ($file, $line, $func) = @_;
 	my $linear;
@@ -240,14 +244,15 @@ sub linearize {
 		$str =~ s/^\s+//;
 		$linear = $str.$linear;
 	}
-	#get the whole declaration
-	if (${$file}[$line] =~ /^$CURR_FUNC/) {
+	#get the whole declaration: capture the ^static inline hidden on prev line...
+	if (${$file}[$line -1] =~ /^\s*[\w\*]+\s*$/) {
 		$line--;
 		panic ("Reached Line 0: $linear\n") if ($line <= 0);
 		$str = ${$file}[$line];
 		$str =~ s/^\s+//;
 		$linear = $str.$linear;
 	}
+	verbose "$linear\n";
 	return $linear;
 }
 
@@ -298,7 +303,7 @@ sub cscope_recurse {
 		my $cfunc = $CURR_FUNC;
 		my $callee = $CALLEE;
 
-		trace "[$CURR_DEPTH]Recursing to $_\n";
+		trace "[$CURR_DEPTH:$CURR_FUNC]Recursing to $_\n";
 		warning "cscope false positive>$_\n" and next if />$CURR_FUNC/;
 
 		my @endless_check = grep /^$line[1]$/, @REC_HEAP;
@@ -316,6 +321,39 @@ sub cscope_recurse {
 			parse_file_line($file, $line[2], $field, $idx);
 		} else {
 			unless ($str =~ /^\s*static/) {
+				my $dir = dirname $CURR_FILE;
+				my $new_dir = dirname $line[0];
+
+				unless ($new_dir eq $dir) {
+					my $is_local = 0;
+					my @definition = qx(cscope -dL -1 $CALLEE);
+					warning "Recursing to different Dir $dir -> $new_dir\n";
+
+					### Prooning NAme conflicts....
+					for my $def (@definition) {
+						chomp $def;
+						my @def = split /\s+/, $def;
+						my $nfile = shift @def; #file
+						my $ndir = dirname $nfile;
+						shift @def; #func
+						shift @def; #line
+						my $test = join ' ', @def;
+						chomp $test;
+						verbose "$test\n";	
+						#if ($test =~ /EXPORT_SYMBOL\($CALLEE\)/) {
+						if ($test =~ /EXPORT_SYMBOL\w*/) {
+							warning "Ok symbol exported...\n";
+						}
+						if ($test =~ /^define/) {
+							warning "Ok symbol defined...\n";
+						}
+						#Name collision...
+						if ((index($ndir, $dir) == -1) && (index($dir, $ndir) == -1)) {
+							warning "Erronous Jump...\n";
+						}	
+					}
+				}
+
 				$CURR_FILE = $line[0];
 				tie my @file_text, 'Tie::File', $line[0];
 				parse_file_line(\@file_text, $line[2], $field, $idx);
@@ -357,6 +395,11 @@ sub identify_risk {
 	} else {
 		alert "Miss: $str\n";
 	}
+}
+
+sub handle_assignment {
+	my ($file, $line, $param, $match, $field, $type) = @_;
+	my $str = linearize_assignment $file, $line;
 }
 
 sub handle_declaration {
