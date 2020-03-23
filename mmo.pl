@@ -18,6 +18,7 @@ use Cwd;
 
 ##################### GLOBALS ##########################
 my $RECURSION_DEPTH_LIMIT = 8;
+my $LOGS_DIR = '/tmp/logs';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
@@ -502,7 +503,11 @@ sub parse_file_line {
 		$vars[$entry_num] =~ s/\s+//g;
 		$var = $vars[$entry_num];
 	}
-	panic "Is NULL? $str\n" if ($var eq 'NULL');
+	if ($var eq 'NULL') {
+		trace "Invalid path $str\n";
+		return ;
+	}
+
 	trace "$line>> |$var| $str \n";
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
 	get_definition $file, $line -1, $var, $field;
@@ -510,7 +515,7 @@ sub parse_file_line {
 
 sub start_parsing {
 	$TID = threads->tid();
-	open $FH, '>', "/tmp/logs/$TID.txt";
+	open $FH, '>', "$LOGS_DIR/$TID.txt";
 	my $file = get_next() ;
 
 	while (defined $file) {
@@ -567,6 +572,8 @@ if (defined $TRY_CONFIG) {
 
 print ITALIC, CYAN, "Found $#cscope_lines files\n", RESET;
 my $nproc = `nproc`;
+qx(mkdir -p $LOGS_DIR);
+
 my @threads;
 
 while ($nproc--) {
