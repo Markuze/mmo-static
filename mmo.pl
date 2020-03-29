@@ -19,7 +19,7 @@ use Cwd;
 ##################### GLOBALS ##########################
 my $RECURSION_DEPTH_LIMIT = 8;
 my $LOGS_DIR = '/tmp/logs';
-my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
+my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-mmo';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
 my $TRY_CONFIG = undef;
@@ -218,6 +218,58 @@ sub collect_cb {
 	return $callback_count;
 }
 
+sub is_name_conflict {
+	my ($line, $str, $cfunc) = @_;
+
+	verbose "conflict: $str [$cfunc]\n";
+	return undef unless ($str =~ /^\s*static/);
+
+	my $dir = dirname $CURR_FILE;
+	my $new_dir = dirname $$line[0];
+	my $ok = 0;
+
+	verbose "$dir -> $new_dir\n";
+	return 1 if ($new_dir eq $dir);
+
+	#check for name conflict in case different locations
+	my $is_local = 0;
+	my @definition = qx(cscope -dL -1 $CALLEE);
+	warning "Recursing to different Dir $dir -> $new_dir\n";
+
+	### Prooning NAme conflicts....
+	for my $def (@definition) {
+		chomp $def;
+		my @def = split /\s+/, $def;
+		my $nfile = shift @def; #file
+		my $ndir = dirname $nfile;
+		shift @def; #func
+		shift @def; #line
+		my $test = join ' ', @def;
+		chomp $test;
+		verbose "$test\n";	
+		#if ($test =~ /EXPORT_SYMBOL\($CALLEE\)/) {
+		if ($test =~ /EXPORT\w*SYMBOL\w*/) {
+			warning "Ok symbol exported...\n";
+			$ok++;
+			next;
+		}
+		if ($test =~ /^#define/) {
+			warning "Ok symbol defined...\n";
+			$ok++;
+			next;
+		}
+		#Name collision...
+		if ((index($ndir, $dir) == -1) && (index($dir, $ndir) == -1)) {
+			$ok++;
+			warning "Erronous Jump...:$def\n";
+		} else {
+			warning "Related Jump...: $def\n";
+			$ok++;
+		}
+	}
+	return undef;
+}
+
 sub linearize_assignment {
 	my ($file, $line, $func) = @_;
 }
@@ -294,7 +346,7 @@ sub cscope_recurse {
 	}
 
 	$field = undef if ($match eq $field);
-	error "Recursionlimit exceeded: $CURR_DEPTH\n" and return if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
+	error "Recursion limit exceeded: $CURR_DEPTH\n" and return if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	$CURR_DEPTH++;
 	for (@cscope) {
 		chomp;
@@ -320,40 +372,8 @@ sub cscope_recurse {
 		if ($line[0] eq $CURR_FILE) {
 			parse_file_line($file, $line[2], $field, $idx);
 		} else {
-			unless ($str =~ /^\s*static/) {
-				my $dir = dirname $CURR_FILE;
-				my $new_dir = dirname $line[0];
-
-				unless ($new_dir eq $dir) {
-					my $is_local = 0;
-					my @definition = qx(cscope -dL -1 $CALLEE);
-					warning "Recursing to different Dir $dir -> $new_dir\n";
-
-					### Prooning NAme conflicts....
-					for my $def (@definition) {
-						chomp $def;
-						my @def = split /\s+/, $def;
-						my $nfile = shift @def; #file
-						my $ndir = dirname $nfile;
-						shift @def; #func
-						shift @def; #line
-						my $test = join ' ', @def;
-						chomp $test;
-						verbose "$test\n";	
-						#if ($test =~ /EXPORT_SYMBOL\($CALLEE\)/) {
-						if ($test =~ /EXPORT_SYMBOL\w*/) {
-							warning "Ok symbol exported...\n";
-						}
-						if ($test =~ /^define/) {
-							warning "Ok symbol defined...\n";
-						}
-						#Name collision...
-						if ((index($ndir, $dir) == -1) && (index($dir, $ndir) == -1)) {
-							warning "Erronous Jump...\n";
-						}	
-					}
-				}
-
+			my $ok = is_name_conflict \@line, $str, $cfunc;
+			if ( defined $ok ) {
 				$CURR_FILE = $line[0];
 				tie my @file_text, 'Tie::File', $line[0];
 				parse_file_line(\@file_text, $line[2], $field, $idx);
