@@ -59,7 +59,7 @@ sub usage {
 }
 
 sub new_trace {
-	$FH = *STDOUT unless defined $FH;;
+	$FH = *STDOUT unless defined $FH;
 	print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "@_", RESET;
 	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
 }
@@ -93,8 +93,12 @@ sub error {
 
 sub alert {
 	$FH = *STDOUT unless defined $FH;
-	my $prfx = dirname $CURR_FILE;
-	$prfx = "$TID: $prfx) $CURR_FUNC:\t";
+	my $prfx = "init:";
+
+	if (defined $CURR_FILE) {
+		$prfx = dirname $CURR_FILE;
+		$prfx = "$TID: $prfx) $CURR_FUNC:\t";
+	}
 	print $FH BOLD, MAGENTA, $prfx, @_, RESET;
 	print BOLD, MAGENTA, $prfx, @_, RESET;
 	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
@@ -246,7 +250,7 @@ sub is_name_conflict {
 		shift @def; #line
 		my $test = join ' ', @def;
 		chomp $test;
-		verbose "$test\n";	
+		verbose "$test\n";
 		#if ($test =~ /EXPORT_SYMBOL\($CALLEE\)/) {
 		if ($test =~ /EXPORT\w*SYMBOL\w*/) {
 			warning "Ok symbol exported...\n";
@@ -322,12 +326,21 @@ sub cscope_add_entry {
 	$cscope_lines{"$file"}{$l} = ${$line}[1] unless exists $cscope_lines{"$file"}{$l};
 }
 
+my %skipping = ();
+
 sub cscope_array {
 	my $array = shift;
 
 	for (@{$array}) {
 		my @line = split /\s/, $_;
-		cscope_add_entry $line[0], \@line;
+		if ($line[0] =~ /^drivers/) {
+			cscope_add_entry $line[0], \@line;
+		} else {
+			unless (exists $skipping{"$line[0]"}) {
+				print BOLD, MAGENTA, "skipping $line[0]\n", RESET;
+				$skipping{"$line[0]"} = undef;
+			}
+		}
 	}
 }
 
@@ -639,32 +652,41 @@ qx(mkdir -p $LOGS_DIR);
 
 my @threads;
 
+print ITALIC, CYAN, "Spawning threads\n", RESET;
 while ($nproc--) {
+	print ITALIC, CYAN, "starting $nproc\n", RESET;
 	my $th = threads->create(\&start_parsing);
+	print ITALIC, CYAN, "$nproc running\n", RESET;
 	push @threads, $th;
 }
 
+print ITALIC, CYAN, "Waiting\n", RESET;
 for (@threads) {
 	$_->join();
 }
-printf "Done waiting...\n";
+print ITALIC, CYAN, "Joined\n", RESET;
 
 my @cb = ();
 my @heap = ();
 my @slab = ();
 my @other = ();
 
+my $cnt = 0;
+my $err = 0;
 foreach my $file (keys %cscope_lines) {
+	$cnt++;
 	foreach my $line (keys %{$cscope_lines{$file}}) {
 		my $trace = $cscope_lines{$file}{$line};
 		my $ref = ref $trace;
 
 		print WHITE, "$file:$line <$ref>\n", RESET;
 		error "$file:$line\n" unless ($ref eq 'ARRAY');
+		$err++ unless ($ref eq 'ARRAY');
 		while (@{$trace}) {
 			my $str = pop @{$trace};
 			print GREEN, $str ,RESET;
 		}
 	}
 }
+print BOLD, BLUE, "Parsed $cnt Files ($err)" ,RESET;
 #start_parsing;
