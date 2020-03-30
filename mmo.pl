@@ -227,20 +227,22 @@ sub is_name_conflict {
 	my ($line, $str, $cfunc) = @_;
 
 	return undef if ($str =~ /^\s*static/); #TODO: check that this is not an h file
-	verbose "conflict: $str [$cfunc]\n";
 
 	my $dir = dirname $CURR_FILE;
 	my $new_dir = dirname $$line[0];
-	my $ok = 0;
 
-	verbose "$dir -> $new_dir\n";
+	#verbose "$dir -> $new_dir\n";
+	#TODO: This is a conjecture, you can possibly have a name conflict in same dir w/o static
 	return 1 if ($new_dir eq $dir);
+	verbose "conflict: $str [$cfunc]\n";
 
+	unless ((index($new_dir, $dir) == -1) && (index($dir, $new_dir) == -1)) {
+		verbose "Related Jump...\n";
+		return 1;
+	}
 	#check for name conflict in case different locations
-	my $is_local = 0;
-	my @definition = qx(cscope -dL -1 $CALLEE);
-	warning "Recursing to different Dir $dir -> $new_dir\n";
-
+	my @definition = qx(cscope -dL -0 $cfunc);
+	verbose "cscope -dL -1 $cfunc\n";
 	### Prooning NAme conflicts....
 	for my $def (@definition) {
 		chomp $def;
@@ -251,27 +253,19 @@ sub is_name_conflict {
 		shift @def; #line
 		my $test = join ' ', @def;
 		chomp $test;
-		verbose "$test\n";
+		#verbose "def: $test\n";
 		#if ($test =~ /EXPORT_SYMBOL\($CALLEE\)/) {
 		if ($test =~ /EXPORT\w*SYMBOL\w*/) {
-			warning "Ok symbol exported...\n";
-			$ok++;
-			next;
+			warning "Ok symbol exported...:$test\n";
+			return 1;
 		}
-		if ($test =~ /^#define/) {
-			warning "Ok symbol defined...\n";
-			$ok++;
-			next;
+		if ($test =~ /^#define\s+$cfunc\W/) {
+			warning "Ok symbol defined...:$test\n";
+			return 1;
 		}
 		#Name collision...
-		if ((index($ndir, $dir) == -1) && (index($dir, $ndir) == -1)) {
-			$ok++;
-			warning "Erronous Jump...:$def\n";
-		} else {
-			warning "Related Jump...: $def\n";
-			$ok++;
-		}
 	}
+	warning "BAD Jump: ?\n";
 	return undef;
 }
 
