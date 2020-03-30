@@ -222,11 +222,12 @@ sub collect_cb {
 	return $callback_count;
 }
 
+#TODO: Handle .h files SMC_insl
 sub is_name_conflict {
 	my ($line, $str, $cfunc) = @_;
 
+	return undef if ($str =~ /^\s*static/); #TODO: check that this is not an h file
 	verbose "conflict: $str [$cfunc]\n";
-	return undef unless ($str =~ /^\s*static/);
 
 	my $dir = dirname $CURR_FILE;
 	my $new_dir = dirname $$line[0];
@@ -291,22 +292,22 @@ sub linearize {
 		panic ("END OF FILE: $$file[$line] ($tmp)\n") if $tmp > $#{$file};
 		$str = ${$file}[$tmp];
 		$str =~ s/^\s+//;
-		$linear.= $str;
+		$linear.= " $str";
 	}
 	until (${$file}[$line -1] =~ /[{};]|^#|\*\// or ${$file}[$line] =~ /$CURR_FUNC/) {
 		$line--;
 		panic ("Reached Line 0: $linear\n") if ($line <= 0);
 		$str = ${$file}[$line];
 		$str =~ s/^\s+//;
-		$linear = $str.$linear;
+		$linear = "$str $linear";
 	}
 	#get the whole declaration: capture the ^static inline hidden on prev line...
-	if (${$file}[$line -1] =~ /^\s*[\w\*]+\s*$/) {
+	if (${$file}[$line -1] =~ /^\s*[\w\*\s]+\s*$/) {
 		$line--;
 		panic ("Reached Line 0: $linear\n") if ($line <= 0);
 		$str = ${$file}[$line];
 		$str =~ s/^\s+//;
-		$linear = $str.$linear;
+		$linear = "$str $linear";
 	}
 	verbose "$linear\n";
 	return $linear;
@@ -392,7 +393,7 @@ sub cscope_recurse {
 				parse_file_line(\@file_text, $line[2], $field, $idx);
 				$CURR_FILE = $cfile;
 			} else {
-				warning "False Positive cscope match: $_\n";
+				verbose "False Positive cscope match: $_\n";
 			}
 		}
 		pop @REC_HEAP;
@@ -526,12 +527,10 @@ sub get_definition {
 			trace "$line ]] $$file[$line]\n";
 			$type = $$file[$line];
 			if ($$file[$line] =~ /build_skb/) {
-				alert "build_skb exposes shared_info\n";
-				trace "build_skb exposes shared_info\n";
+				trace "build_skb exposes shared_info: $type\n";
 			}
 			if ($$file[$line] =~ /alloc_skb/) {
-				alert "alloc_skb exposes shared_info\n";
-				trace "alloc_skb exposes shared_info\n";
+				trace "alloc_skb exposes shared_info: $type\n";
 			}
 		}
 
@@ -539,10 +538,9 @@ sub get_definition {
 			trace "$line ]] $$file[$line]\n";
 			$type = $$file[$line];
 			if ($$file[$line] =~ /build_skb/) {
-				alert "build_skb exposes shared_info\n";
+				trace "build_skb exposes shared_info\n";
 			}
 			if ($$file[$line] =~ /alloc_skb/) {
-				alert "alloc_skb exposes shared_info\n";
 				trace "alloc_skb exposes shared_info\n";
 			}
 		}
