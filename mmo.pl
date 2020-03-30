@@ -17,7 +17,7 @@ use File::Spec::Functions;
 use Cwd;
 
 ##################### GLOBALS ##########################
-my $RECURSION_DEPTH_LIMIT = 8;
+my $RECURSION_DEPTH_LIMIT = 16;
 my $LOGS_DIR = '/tmp/logs';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-mmo';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
@@ -28,6 +28,7 @@ my $TID;
 
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
+my %exported_symbols : shared = ();
 
 my $CURR_FILE = undef; #per thread variable
 my $CURR_FUNC = undef; #per thread variable
@@ -112,6 +113,18 @@ sub warning {
 sub get_next {
 	lock @cscope_lines;
 	return pop @cscope_lines;
+}
+
+sub check_exported {
+	my $name = shift;
+	lock %exported_symbols;
+	return  $exported_symbols{"$name"};
+}
+
+sub add_exported {
+	my $name = shift;
+	lock %exported_symbols;
+	$exported_symbols{"$name"} = 1;
 }
 
 sub extract_call_only {
@@ -226,6 +239,7 @@ sub collect_cb {
 sub is_name_conflict {
 	my ($line, $str, $cfunc) = @_;
 
+	return undef if (defined (check_exported $cfunc));
 	return undef if ($str =~ /^\s*static/); #TODO: check that this is not an h file
 
 	my $dir = dirname $CURR_FILE;
@@ -257,6 +271,7 @@ sub is_name_conflict {
 		#if ($test =~ /EXPORT_SYMBOL\($CALLEE\)/) {
 		if ($test =~ /EXPORT\w*SYMBOL\w*/) {
 			warning "Ok symbol exported...:$test\n";
+			add_exported $cfunc;
 			return 1;
 		}
 		if ($test =~ /^#define\s+$cfunc\W/) {
