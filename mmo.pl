@@ -295,8 +295,32 @@ sub is_name_conflict {
 	return undef;
 }
 
+sub linearize_cond_assignment {
+	my ($file, $line) = @_;
+	my $str = ${$file}{$line};
+
+	foreach (split //, $str) {
+		$i++ if /\(/;
+		$i-- if /\)/;
+		panic "ERROR: $str\n" if $i < 0;
+		$out .= "$_";
+		last if $i == 0;
+	}
+
+}
+
 sub linearize_assignment {
-	my ($file, $line, $func) = @_;
+	my ($file, $line) = @_;
+	my $str = ${$file}{$line};
+
+	return linearize_cond_assignment($file, $line) if ($str =~ /while|\Wif\W/);
+
+	until  (${$file}{$line} =~ /;/) {
+		$line++;
+		panic ("END OF FILE: $$file[$line] ($line)\n") if $line > $#{$file};
+		$str.= " ${$file}{$line}";
+	}
+	return $str;
 }
 
 sub linearize {
@@ -387,7 +411,8 @@ sub cscope_recurse {
 	}
 
 	$field = undef if ($match eq $field);
-	error "Recursion limit exceeded: $CURR_DEPTH\n" and return if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
+	error "Recursion limit exceeded: $CURR_DEPTH\n" and return
+							if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	inc_depth;
 
 	for (@cscope) {
