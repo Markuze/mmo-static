@@ -313,7 +313,8 @@ sub linearize_cond_assignment {
 		$idx++;
 	}
 	panic "Please handle a multi-line conditional assignment $str\n" if ($i > 0);
-	trace "ASSIGNMENT (cond): $out\n";
+	verbose "ASSIGNMENT (cond): $out\n";
+	return $out;
 }
 
 sub linearize_assignment {
@@ -325,9 +326,11 @@ sub linearize_assignment {
 	until  (${$file}[$line] =~ /;/) {
 		$line++;
 		panic ("END OF FILE: $$file[$line] ($line)\n") if $line > $#{$file};
-		$str.= " ${$file}[$line]";
+		my $tmp =${$file}[$line];
+		$tmp =~ s/^\s+//;
+		$str.= " $tmp";
 	}
-	trace "ASSIGNMENT (lin): $str\n";
+	verbose "ASSIGNMENT (lin): $str\n";
 	return $str;
 }
 
@@ -500,7 +503,7 @@ sub handle_assignment {
 }
 
 sub handle_declaration {
-	my ($file, $line, $param, $match, $field, $type) = @_;
+	my ($file, $line, $param, $match, $field) = @_;
 	my $name = $CURR_FILE;
 	my $str = linearize $file, $line;
 
@@ -558,7 +561,6 @@ sub handle_declaration {
 
 sub get_definition {
 	my ($file, $line, $param, $field) = @_;
-	my $type = undef;
 	my $match = $param;
 
 	panic("ERROR: Param not defined: $CURR_FILE: $line\n") unless defined $param;
@@ -588,9 +590,8 @@ sub get_definition {
                 }
 
 		if ($$file[$line] =~ /\W+$match\s*=[^=]/) {
-			$type = $$file[$line];
-			trace "ASSIGNMENT: $line : $$file[$line]\n";
-			linearize_assignment $file, $line, $match;
+			my $str = linearize_assignment $file, $line, $match;
+			trace "ASSIGNMENT: $line : $str\n";
 		#if ($$file[$line] =~ /build_skb/) {
 		#	trace "build_skb exposes shared_info: $type\n";
 		#}
@@ -600,9 +601,8 @@ sub get_definition {
 		}
 
 		if ($$file[$line] =~ /[>\.]$field\s*=[^=]/) {
-			$type = $$file[$line];
-			trace "ASSIGNMENT: $line : $$file[$line]\n";
-			linearize_assignment $file, $line, $field;
+			my $str = linearize_assignment $file, $line, $field;
+			trace "ASSIGNMENT: $line : $str\n";
 		#if ($$file[$line] =~ /build_skb/) {
 		#	trace "build_skb exposes shared_info\n";
 		#}
@@ -612,7 +612,7 @@ sub get_definition {
 		}
 
 		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
-			handle_declaration ($file, $line, $param, $match, $field, $type);
+			handle_declaration ($file, $line, $param, $match, $field);
 			return;
 		}
 		$line--;
