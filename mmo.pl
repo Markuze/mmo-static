@@ -33,6 +33,7 @@ my %exported_symbols : shared = ();
 my $CURR_FILE = undef; #per thread variable
 my $CURR_FUNC = undef; #per thread variable
 my $CURR_DEPTH = 0;
+my $CURR_DEPTH_MAX : shared = 0;
 my @REC_HEAP = ();
 
 my $CALLEE = undef; #per thread variable
@@ -66,13 +67,14 @@ sub new_trace {
 }
 
 sub trace {
-	$FH = *STDOUT unless defined $FH;;
-	print $FH ITALIC, BRIGHT_BLUE, "@_", RESET;
-	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
+	my $space = "\t"x$CURR_DEPTH;
+	$FH = *STDOUT unless defined $FH;
+	print $FH ITALIC, BRIGHT_BLUE, "${space}@_", RESET;
+	push @{$CURR_STACK}, "${space}@_" if defined $CURR_STACK;
 }
 
 sub verbose {
-	$FH = *STDOUT unless defined $FH;;
+	$FH = *STDOUT unless defined $FH;
 	print $FH color('bright_green');
 	print $FH @_ if defined $verbose;
 	print  $FH color('reset');
@@ -113,6 +115,15 @@ sub warning {
 sub get_next {
 	lock @cscope_lines;
 	return pop @cscope_lines;
+}
+
+sub inc_depth {
+	$CURR_DEPTH++;
+
+	if ($CURR_DEPTH > $CURR_DEPTH_MAX) {
+		lock $CURR_DEPTH_MAX;
+		$CURR_DEPTH_MAX  = $CURR_DEPTH
+	}
 }
 
 sub check_exported {
@@ -371,13 +382,14 @@ sub cscope_recurse {
 	# 2. Follow func ptrs (e.g., netdev_ops)
 	unless ($#cscope > -1) {
 		warning "Found NO callers for $CURR_FUNC!!!\n";
-		trace "Found NO callers for $CURR_FUNC!!!\n";
+		trace "TEXT: Found NO callers for $CURR_FUNC!!!\n";
 		return;
 	}
 
 	$field = undef if ($match eq $field);
 	error "Recursion limit exceeded: $CURR_DEPTH\n" and return if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
-	$CURR_DEPTH++;
+	inc_depth;
+
 	for (@cscope) {
 		chomp;
 		my @line = split /\s/, $_;
@@ -385,8 +397,8 @@ sub cscope_recurse {
 		my $cfunc = $CURR_FUNC;
 		my $callee = $CALLEE;
 
-		trace "[$CURR_DEPTH:$CURR_FUNC]Recursing to $_\n";
-		warning "cscope false positive>$_\n" and next if />$CURR_FUNC/;
+		verbose "[$CURR_DEPTH:$CURR_FUNC]Recursing to $_\n";
+		next if />$CURR_FUNC/;
 
 		my @endless_check = grep /^$line[1]$/, @REC_HEAP;
 		if (@endless_check) {
@@ -400,12 +412,14 @@ sub cscope_recurse {
 		panic "void caller!\n" if ($CURR_FUNC eq "void");
 
 		if ($line[0] eq $CURR_FILE) {
+			trace "RECURSION: [$CURR_DEPTH:$CURR_FUNC] $_\n";
 			parse_file_line($file, $line[2], $field, $idx);
 		} else {
 			my $ok = is_name_conflict \@line, $str, $cfunc;
 			if ( defined $ok ) {
 				$CURR_FILE = $line[0];
 				tie my @file_text, 'Tie::File', $line[0];
+				trace "RECURSION: [$CURR_DEPTH:$CURR_FUNC] $_\n";
 				parse_file_line(\@file_text, $line[2], $field, $idx);
 				$CURR_FILE = $cfile;
 			} else {
@@ -428,20 +442,20 @@ sub identify_risk {
 		%struct = ();
 		my $cb = collect_cb("",$struct, $name, $mapped_field);
 		if ($cb > 0) {
-			trace "Total Possible callbacks $cb\n";
+			trace "TEXT: Total Possible callbacks $cb\n";
 		} else {
 			warning "Need to check if nested/assigned...\n";
-			trace "No callbacks\n";
+			trace "TEXT: No callbacks\n";
 		}
 		if ($str =~ /struct\s+(\w+)\s+\s*$match/) {
-			trace "HEAP mapped!!!\n";
+			trace "TEXT: HEAP mapped!!!\n";
 			#pqi_map_single
 		} else {
 			warning "Collect cb for inner Field\n";#TODO
-			trace "Check Assignment/and Field Type\n";
+			trace "TEXT: Check Assignment/and Field Type\n";
 		}
 	} elsif ($str =~ /(\w+)\s+\**\s*$match/) {
-		trace "$str\n";
+		trace "TEXT: Hit: $str\n";
 	} else {
 		alert "Miss: $str\n";
 	}
@@ -468,16 +482,17 @@ sub handle_declaration {
 	} else {
 		$name =~ s/\.c/\.o/;
 
-		trace "$line ]>($param [$match][$field]) $str\n";
+		trace "DECLARATION: $line:  $str | ($param [$match][$field])\n";
 		if ($param =~ /&\w+/) {
 			warning "High Risk\n";
 			if ($str =~ /struct\s+(\w+)\s+\**\s*$match/) {
 				my $struct = $1;
-				trace ")>struct $struct\n";
+				trace "High Risk: struct $struct\n";
 				%struct = ();
 				my $cb = collect_cb("",$struct, $name);
 				if ($cb > 0) {
 					alert "Total Possible callbacks $cb\n";
+					trace "TEXT: High Risk: Total Possible callbacks $cb\n";
 				} else {
 					warning "Need to check if nested...\n";
 				}
@@ -539,26 +554,26 @@ sub get_definition {
 			$line--;
                 }
 
-		if ($$file[$line] =~ /\s+$match\s*=/) {
-			trace "$line ]] $$file[$line]\n";
+		if ($$file[$line] =~ /\W+$match\s*=[^=]/) {
 			$type = $$file[$line];
-			if ($$file[$line] =~ /build_skb/) {
-				trace "build_skb exposes shared_info: $type\n";
-			}
-			if ($$file[$line] =~ /alloc_skb/) {
-				trace "alloc_skb exposes shared_info: $type\n";
-			}
+			trace "ASSIGNMENT: $line : $$file[$line]\n";
+		#if ($$file[$line] =~ /build_skb/) {
+		#	trace "build_skb exposes shared_info: $type\n";
+		#}
+		#if ($$file[$line] =~ /alloc_skb/) {
+		#	trace "alloc_skb exposes shared_info: $type\n";
+		#}
 		}
 
-		if ($$file[$line] =~ /\s+$field\s*=/) {
-			trace "$line ]] $$file[$line]\n";
+		if ($$file[$line] =~ /[>\.]$field\s*=[^=]/) {
 			$type = $$file[$line];
-			if ($$file[$line] =~ /build_skb/) {
-				trace "build_skb exposes shared_info\n";
-			}
-			if ($$file[$line] =~ /alloc_skb/) {
-				trace "alloc_skb exposes shared_info\n";
-			}
+			trace "ASSIGNMENT: $line : $$file[$line]\n";
+		#if ($$file[$line] =~ /build_skb/) {
+		#	trace "build_skb exposes shared_info\n";
+		#}
+		#if ($$file[$line] =~ /alloc_skb/) {
+		#	trace "alloc_skb exposes shared_info\n";
+		#}
 		}
 
 		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
@@ -598,11 +613,11 @@ sub parse_file_line {
 		$var = $vars[$entry_num];
 	}
 	if ($var eq 'NULL') {
-		trace "Invalid path $str\n";
+		trace "ERROR: Invalid path $str\n";
 		return ;
 	}
 
-	trace "$line>> |$var| $str \n";
+	trace "MAPPING: $line : $str | ($var) \n";
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
 	get_definition $file, $line -1, $var, $field;
 }
@@ -616,7 +631,8 @@ sub start_parsing {
 		$CURR_FILE = delete ${$file}{'file'};
 #		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
 			#$file = get_next() and next if $CURR_FILE =~ /staging/;
-			new_trace "$CURR_FILE\n";
+			#new_trace "$CURR_FILE\n";
+			print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "Parsing: $CURR_FILE", RESET;
 			tie my @file, 'Tie::File', $CURR_FILE;
 
 			foreach (keys %{$file}) {
@@ -703,5 +719,5 @@ foreach my $file (keys %cscope_lines) {
 		}
 	}
 }
-print BOLD, BLUE, "Parsed $cnt Files ($err)" ,RESET;
+print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX]\n" ,RESET;
 #start_parsing;
