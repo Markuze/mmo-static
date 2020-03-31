@@ -296,30 +296,38 @@ sub is_name_conflict {
 }
 
 sub linearize_cond_assignment {
-	my ($file, $line) = @_;
-	my $str = ${$file}{$line};
+	my ($file, $line, $par) = @_;
+	my $str = ${$file}[$line];
+	my @str = split //, $str;
+	my $i = 0;
+	my $out = "";
 
-	foreach (split //, $str) {
-		$i++ if /\(/;
-		$i-- if /\)/;
-		panic "ERROR: $str\n" if $i < 0;
-		$out .= "$_";
-		last if $i == 0;
+	my $idx = index($str, $par);
+
+	until ($idx > $#str) {
+		my $char = $str[$idx];
+		$i++ if $char =~ /\(/;
+		$i-- if $char =~ /\)/;
+		last if $i < 0;
+		$out .= "$char";
+		$idx++;
 	}
-
+	panic "Please handle a multi-line conditional assignment $str\n" if ($i > 0);
+	trace "ASSIGNMENT (cond): $out\n";
 }
 
 sub linearize_assignment {
-	my ($file, $line) = @_;
-	my $str = ${$file}{$line};
+	my ($file, $line, $par) = @_;
+	my $str = ${$file}[$line];
 
-	return linearize_cond_assignment($file, $line) if ($str =~ /while|\Wif\W/);
+	return linearize_cond_assignment($file, $line, $par) if ($str =~ /while|\Wif\W/);
 
-	until  (${$file}{$line} =~ /;/) {
+	until  (${$file}[$line] =~ /;/) {
 		$line++;
 		panic ("END OF FILE: $$file[$line] ($line)\n") if $line > $#{$file};
-		$str.= " ${$file}{$line}";
+		$str.= " ${$file}[$line]";
 	}
+	trace "ASSIGNMENT (lin): $str\n";
 	return $str;
 }
 
@@ -582,6 +590,7 @@ sub get_definition {
 		if ($$file[$line] =~ /\W+$match\s*=[^=]/) {
 			$type = $$file[$line];
 			trace "ASSIGNMENT: $line : $$file[$line]\n";
+			linearize_assignment $file, $line, $match;
 		#if ($$file[$line] =~ /build_skb/) {
 		#	trace "build_skb exposes shared_info: $type\n";
 		#}
@@ -593,6 +602,7 @@ sub get_definition {
 		if ($$file[$line] =~ /[>\.]$field\s*=[^=]/) {
 			$type = $$file[$line];
 			trace "ASSIGNMENT: $line : $$file[$line]\n";
+			linearize_assignment $file, $line, $field;
 		#if ($$file[$line] =~ /build_skb/) {
 		#	trace "build_skb exposes shared_info\n";
 		#}
