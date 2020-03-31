@@ -318,6 +318,13 @@ sub linearize {
 		$str =~ s/^\s+//;
 		$linear = "$str $linear";
 	}
+	while (${$file}[$line -1] =~ /\\\s*$/) {
+		$line--;
+		panic ("Reached Line 0: $linear\n") if ($line <= 0);
+		$str = ${$file}[$line];
+		$str =~ s/^\s+//;
+		$linear = "$str $linear";
+	}
 	verbose "$linear\n";
 	return $linear;
 }
@@ -570,6 +577,10 @@ sub parse_file_line {
 
 	my $var;
 	my $str = linearize $file, $line -1;
+	if ($str =~ /^#define\s*(\w+)/) {
+		alert "ADD: Please Add $1 to ROOT_FUNCS\n";
+		return;
+	}
 	my $linear = extract_call_only $str, $CALLEE;
 
 	verbose "begin: $str: $linear\n";
@@ -661,13 +672,10 @@ my @threads;
 
 print ITALIC, CYAN, "Spawning threads\n", RESET;
 while ($nproc--) {
-	print ITALIC, CYAN, "starting $nproc\n", RESET;
 	my $th = threads->create(\&start_parsing);
-	print ITALIC, CYAN, "$nproc running\n", RESET;
 	push @threads, $th;
 }
 
-print ITALIC, CYAN, "Waiting\n", RESET;
 for (@threads) {
 	$_->join();
 }
