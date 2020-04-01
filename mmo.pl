@@ -191,8 +191,8 @@ sub collect_cb {
 	#error "No Such File:$file\n" and
 	return 0 unless -e $file;
 
-	#verbose "pahole -C $struct -EAa $file\n";
 	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
+	verbose "pahole -C $struct -EAa $file [$#out]\n";
 	if (defined $field) {
 		my @def = grep (/\*\s*$field\W/, @out);
 		if ($#def > -1) {
@@ -478,13 +478,13 @@ sub identify_risk {
 		%struct = ();
 		my $cb = collect_cb("",$struct, $name, $mapped_field);
 		if ($cb > 0) {
-			trace "TEXT: Total Possible callbacks $cb\n";
+			trace "RISK: Total Possible callbacks $cb\n";
 		} else {
 			warning "Need to check if nested/assigned...\n";
 			trace "TEXT: No callbacks\n";
 		}
 		if ($str =~ /struct\s+(\w+)\s+\s*$match/) {
-			trace "TEXT: HEAP mapped!!!\n";
+			trace "RISK: HEAP mapped!!!\n";
 			#pqi_map_single
 		} else {
 			warning "Collect cb for inner Field\n";#TODO
@@ -653,6 +653,9 @@ sub parse_file_line {
 	}
 
 	trace "MAPPING: $line : $str | ($var) \n";
+	if ($var eq 'skb->data') {
+		trace "RISK:[SKB] skb->data exposes sh_info\n";
+	}
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
 	get_definition $file, $line -1, $var, $field;
 }
