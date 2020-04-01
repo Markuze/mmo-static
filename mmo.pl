@@ -19,7 +19,7 @@ use Cwd;
 ##################### GLOBALS ##########################
 my $RECURSION_DEPTH_LIMIT = 16;
 my $LOGS_DIR = '/tmp/logs';
-my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-mmo';
+my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
 my $TRY_CONFIG = undef;
@@ -396,7 +396,7 @@ sub cscope_array {
 
 	for (@{$array}) {
 		my @line = split /\s/, $_;
-		if ($line[0] =~ /^drivers/) {
+		if ($line[0] =~ /drivers/) {
 			cscope_add_entry $line[0], \@line;
 		} else {
 			unless (exists $skipping{"$line[0]"}) {
