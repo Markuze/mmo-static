@@ -700,6 +700,9 @@ sub parse_file_line {
 	}
 	if ($var =~ /[>\.].+[>\.]/) {
 		trace "MANUAL: Please review manualy ($var)\n";
+		#TODO: Do handle these cases ~20/43
+		# grep -iP "manual" /tmp/out.txt |grep -P "[^\.>\w]\w+\->[\w\.]+\)"|wc -l
+		# one is HEAP, several with &....
 		return;
 	}
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
