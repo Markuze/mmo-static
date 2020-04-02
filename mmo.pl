@@ -40,7 +40,8 @@ my @REC_HEAP = ();
 
 my $CALLEE = undef; #per thread variable
 my $CURR_STACK = undef;
-my %struct = ();
+my %struct_log = ();
+my %struct_cache = ();
 ####################### INIT #####################
 my %opts = ();
 my $argv = "@ARGV";
@@ -207,14 +208,24 @@ sub get_param_idx {
 sub collect_cb {
 	my ($prfx, $struct, $file, $field) = @_;
 	my $callback_count = 0;
-	$struct{$struct} = undef;
+	$struct_log{$struct} = undef;
 
 	#error "No Such File:$file\n" and
 	return 0 unless -e $file;
 
 	my @out = qx(/usr/bin/pahole -C $struct -EAa $file 2>/dev/null);
 	verbose "pahole -C $struct -EAa $file [$#out]\n";
+	if ($#out < 0) {
+		my @defs = qx(cscope -dL -1 $struct);
+		alert "Please get the struct from other fiels\n" unless
+					exists $struct_cache{$struct};
+		if ($#defs < 0) {
+			error "Canr locate the definition of $struct\n";
+		}
+		$struct_cache{$struct} = undef;
+	}
 	if (defined $field) {
+		### is this a pointer
 		my @def = grep (/\*\s*$field\W/, @out);
 		if ($#def > -1) {
 			for (@def) {
@@ -237,9 +248,10 @@ sub collect_cb {
 		} else {
 			@def = grep (/$field\[/, @out);
 			if ($#def > -1) {
-				error "No such field: $field in $struct\n";
-			} else {
 				verbose "mapping of $field includes $struct\n";
+				trace "MApped array: $def[0]\n";
+			} else {
+				error "No such field: $field in $struct\n";
 			}
 		}
 	}
@@ -249,7 +261,7 @@ sub collect_cb {
 	if (@cb > 0) {
 		my $num = @cb;
 		if ($prfx eq '') {
-		        alert(" $num Callbacks exposed in ${prfx}$struct\n");
+		        trace(" $num Callbacks exposed in ${prfx}$struct\n");
 		}
 		#print "@cb\n" if defined $verbose;
 		$callback_count += $num;
@@ -259,8 +271,8 @@ sub collect_cb {
 	#\s*\*+\s*(\w+)
 	foreach (@st) {
 	        /^\s*struct\s+(\w+)\s+\*+/;
-	        next if exists $struct{$1};
-	        $struct{$1} = undef;
+	        next if exists $struct_log{$1};
+	        $struct_log{$1} = undef;
 	        #print "struct $1\n";
 	        $callback_count += collect_cb("${prfx}$struct->", $1, $file);
 	}
@@ -496,7 +508,7 @@ sub identify_risk {
 		my $struct = $1;
 		my $mapped_field;
 		$mapped_field = $field unless ($match eq $field);
-		%struct = ();
+		%struct_log = ();
 		my $cb = collect_cb("",$struct, $name, $mapped_field);
 		if ($cb > 0) {
 			trace "RISK: Total Possible callbacks $cb\n";
@@ -545,7 +557,7 @@ sub handle_declaration {
 			if ($str =~ /struct\s+(\w+)\s+\**\s*$match/) {
 				my $struct = $1;
 				trace "High Risk: struct $struct\n";
-				%struct = ();
+				%struct_log = ();
 				my $cb = collect_cb("",$struct, $name);
 				if ($cb > 0) {
 					alert "Total Possible callbacks $cb\n";
