@@ -14,3 +14,9 @@
 # 5.  : build_skb - Auto High Risk! (validate with dma_unmap?)
 
 #consider hacking slub (https://lwn.net/Articles/229984/) to force mapping specific addresses.
+
+#####################
+1. Fix recursion on assignment....
+2. Handle case when pahole doesnt find (definition in diff file - use cscope)
+3. Handle typedef
+4. Handle define differently.

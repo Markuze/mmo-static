@@ -17,7 +17,7 @@ use File::Spec::Functions;
 use Cwd;
 
 ##################### GLOBALS ##########################
-my $RECURSION_DEPTH_LIMIT = 16;
+my $RECURSION_DEPTH_LIMIT = 8;
 my $LOGS_DIR = '/tmp/logs';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
@@ -33,7 +33,9 @@ my %exported_symbols : shared = ();
 my $CURR_FILE = undef; #per thread variable
 my $CURR_FUNC = undef; #per thread variable
 my $CURR_DEPTH = 0;
+my $CURR_DEF_DEPTH = 0;
 my $CURR_DEPTH_MAX : shared = 0;
+my $CURR_DEF_DEPTH_MAX : shared = 0;
 my @REC_HEAP = ();
 
 my $CALLEE = undef; #per thread variable
@@ -71,6 +73,7 @@ sub trace {
 	$FH = *STDOUT unless defined $FH;
 	print $FH ITALIC, BRIGHT_BLUE, "${space}@_", RESET;
 	push @{$CURR_STACK}, "${space}@_" if defined $CURR_STACK;
+	panic("WTF?") if @{$CURR_STACK} > 256;
 }
 
 sub verbose {
@@ -117,6 +120,15 @@ sub get_next {
 	return pop @cscope_lines;
 }
 
+sub inc_def_depth {
+	$CURR_DEF_DEPTH++;
+
+	if ($CURR_DEF_DEPTH > $CURR_DEF_DEPTH_MAX) {
+		lock $CURR_DEF_DEPTH_MAX;
+		$CURR_DEF_DEPTH_MAX  = $CURR_DEF_DEPTH
+	}
+}
+
 sub inc_depth {
 	$CURR_DEPTH++;
 
@@ -138,6 +150,15 @@ sub add_exported {
 	$exported_symbols{"$name"} = 1;
 }
 
+sub extract_var {
+	my $str = shift;
+	if ($str =~ /([\w&>\-]+)\s*[\[;\+]/) {
+		return $1;
+	} else {
+		warning "No Match...[$str]\n";
+		return $str;
+	}
+}
 sub extract_call_only {
 	my ($str, $func) = @_;
 	my $out = "";
@@ -563,6 +584,8 @@ sub get_definition {
 	my ($file, $line, $param, $field) = @_;
 	my $match = $param;
 
+	error "Recursion limit exceeded [DEF]: $CURR_DEF_DEPTH\n" and return
+							if $CURR_DEF_DEPTH > $RECURSION_DEPTH_LIMIT;
 	panic("ERROR: Param not defined: $CURR_FILE: $line\n") unless defined $param;
 	$match =~ /&*(\w+)\W*/;
 	$match = $1; #if defined $1;
@@ -591,24 +614,41 @@ sub get_definition {
 
 		if ($$file[$line] =~ /\W+$match\s*=[^=]/) {
 			my $str = linearize_assignment $file, $line, $match;
-			trace "ASSIGNMENT: $line : $str\n";
-		#if ($$file[$line] =~ /build_skb/) {
-		#	trace "build_skb exposes shared_info: $type\n";
-		#}
-		#if ($$file[$line] =~ /alloc_skb/) {
-		#	trace "alloc_skb exposes shared_info: $type\n";
-		#}
+			trace "ASSIGNMENT [P]: $line : $str\n";
+
+			my @str = split /=/, $str;
+			#$str =~ s/^\([^\(\)]+\)//g;
+			#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
+			if ($str[$#str] =~ /\w+\s*\(/) {
+				trace "FUNCTION: $str\n";
+			} else {
+				$str = extract_var $str[$#str];
+				trace "REPLACE: $match -> $str\n";
+				$match = $str;
+				#inc_def_depth;
+				#get_definition($file, $line -1, $str, $field);
+				#$CURR_DEF_DEPTH--;
+			}
 		}
 
-		if ($$file[$line] =~ /[>\.]$field\s*=[^=]/) {
+		if ($$file[$line] =~ /$match\s*[\->\.]+$field\s*=[^=]/) {
 			my $str = linearize_assignment $file, $line, $field;
-			trace "ASSIGNMENT: $line : $str\n";
-		#if ($$file[$line] =~ /build_skb/) {
-		#	trace "build_skb exposes shared_info\n";
-		#}
-		#if ($$file[$line] =~ /alloc_skb/) {
-		#	trace "alloc_skb exposes shared_info\n";
-		#}
+			trace "ASSIGNMENT [F]: $line : $str\n";
+
+			my @str = split /=/, $str;
+			#$str =~ s/^\([^\(\)]+\)//g;
+			#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
+			if ($str =~ /\w+\s*\(/) {
+				trace "FUNCTION: $str\n";
+			} else {
+				$str = extract_var $str[$#str];
+				trace "REPLACE: $field -> $str\n";
+				$field = $str;
+				$match = $str;
+				#inc_def_depth;
+				#get_definition($file, $line -1, $str);
+				#$CURR_DEF_DEPTH--;
+			}
 		}
 
 		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
@@ -653,11 +693,18 @@ sub parse_file_line {
 	}
 
 	trace "MAPPING: $line : $str | ($var) \n";
-	if ($var eq 'skb->data') {
+	if ($var =~ /skb.*\->data/) {
 		trace "RISK:[SKB] skb->data exposes sh_info\n";
+		#TODO: identify skb alloc funciions
+		return;
 	}
+	if ($var =~ /[>\.].+[>\.]/) {
+		trace "MANUAL: Please review manualy ($var)\n";
+		return;
+	}
+	#TODO: DO a better job at separating match/field - dont handle more than direct.
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
-	get_definition $file, $line -1, $var, $field;
+	get_definition $file, $line -2, $var, $field;
 }
 
 sub start_parsing {
@@ -680,6 +727,7 @@ sub start_parsing {
 				panic "void caller!\n" if ($CURR_FUNC eq "void");
 				$CALLEE = 'map_single';#TODO: Fix to match actual root func
 				$CURR_DEPTH = 0;
+				$CURR_DEF_DEPTH = 0;
 				${$file}{$_} = \@trace;
 				$CURR_STACK = \@trace;
 				new_trace "$CURR_FUNC: $_\n";
@@ -757,5 +805,5 @@ foreach my $file (keys %cscope_lines) {
 		}
 	}
 }
-print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX]\n" ,RESET;
+print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET;
 #start_parsing;
