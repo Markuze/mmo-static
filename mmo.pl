@@ -18,6 +18,7 @@ use Cwd;
 
 ##################### GLOBALS ##########################
 my $RECURSION_DEPTH_LIMIT = 8;
+my $RECURSION_DEF_DEPTH_LIMIT = 3;
 my $LOGS_DIR = '/tmp/logs';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
@@ -74,7 +75,7 @@ sub trace {
 	$FH = *STDOUT unless defined $FH;
 	print $FH ITALIC, BRIGHT_BLUE, "${space}@_", RESET;
 	push @{$CURR_STACK}, "${space}@_" if defined $CURR_STACK;
-	panic("WTF?") if @{$CURR_STACK} > 256;
+	panic("Stack overflow...!") if @{$CURR_STACK} > 256;
 }
 
 sub verbose {
@@ -165,7 +166,7 @@ sub extract_call_only {
 	my $out = "";
 	my $i = 0;
 
-	verbose "extract $str\n";
+	#verbose "extract $str\n";
 	$str =~ /$func\s*(\(.*\))/;
 	panic "ERROR: WTF $str:$func\n" unless defined $1;
 	#verbose "extract: $1\n";
@@ -184,25 +185,34 @@ sub extract_call_only {
 	#verbose "Removed $1\n" if defined $1;
 	#$out =~ s/sizeof\s*\(.*?\)/sizeof/g;
 
-	verbose "out: $out\n";
+	#verbose "out: $out\n";
 	return $out;
 }
 
-sub get_param_idx {
-	my ($string, $match) = @_;
+sub get_param {
+	my ($string, $match, $field) = @_;
 	my $str = extract_call_only $string, $CURR_FUNC;
 
 	verbose ("get_idx: $string| $str|$match|\n");
-	verbose "##$str|$match|\n";
+	#verbose "##$str|$match|\n";
 	my @vars = split /,/, $str;
 	my $i = 0;
+	my $type = undef;
+
 	foreach (@vars) {
-		#verbose ("#$_\n");
-		last if /$match/;
+		if (/\W$match\W*/) {
+			$type = $_;
+			$type =~ /(\w+)[\*\s]+$match/;
+			$type = $1 if defined $1;
+			trace "DECLARATION: $_: $type\n";
+			last;
+		}
 		$i++
 	}
-	panic "HEmm... $str" if ($#vars == -1 or $i > $#vars);
-	return $i;
+	#TOTO : show the var and check if ptr/field.
+	panic "HEmm... $str|$match|<$i>" if ($#vars == -1 or $i > $#vars);
+	verbose "$i> $type|::|$match\n";
+	return ($i, $type);
 }
 #################### FUNCTIONS ####################
 sub collect_cb {
@@ -406,7 +416,7 @@ sub linearize {
 		$str =~ s/^\s+//;
 		$linear = "$str $linear";
 	}
-	verbose "$linear\n";
+	#verbose "$linear\n";
 	return $linear;
 }
 
@@ -443,8 +453,8 @@ sub cscope_array {
 }
 
 sub cscope_recurse {
-	my ($file, $str, $match, $field) = @_;
-	my $idx = get_param_idx($str, $match);
+	my ($file, $str, $idx, $match, $field) = @_;
+	#my $idx = get_param_idx($str, $match, $field);
 	my @cscope = qx(cscope -dL -3 $CURR_FUNC);
 
 	#TODO:
@@ -456,7 +466,7 @@ sub cscope_recurse {
 		return;
 	}
 
-	$field = undef if ($match eq $field);
+	$field = undef if (defined $field and $match eq $field);
 	error "Recursion limit exceeded: $CURR_DEPTH\n" and return
 							if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	inc_depth;
@@ -509,7 +519,9 @@ sub identify_risk {
 	if ($str =~ /struct\s+(\w+)\s+\**\s*$match/) {
 		my $struct = $1;
 		my $mapped_field;
-		$mapped_field = $field unless ($match eq $field);
+		if (defined $field) {
+			$mapped_field = $field unless ($match eq $field);
+		}
 		%struct_log = ();
 		my $cb = collect_cb("",$struct, $name, $mapped_field);
 		if ($cb > 0) {
@@ -523,7 +535,7 @@ sub identify_risk {
 			#pqi_map_single
 		} else {
 			warning "Collect cb for inner Field\n";#TODO
-			trace "TEXT: Check Assignment/and Field Type\n";
+			#trace "TEXT: Check Assignment/and Field Type\n";
 		}
 	} elsif ($str =~ /(\w+)\s+\**\s*$match/) {
 		trace "TEXT: Hit: $str\n";
@@ -538,22 +550,26 @@ sub handle_assignment {
 }
 
 sub handle_declaration {
-	my ($file, $line, $param, $match, $field) = @_;
+	my ($file, $line, $param, $match, $field, $stop) = @_;
 	my $name = $CURR_FILE;
 	my $str = linearize $file, $line;
 
 	if ($str =~ /$CURR_FUNC\s*\(/) {
 		#$str = extract_call_only $str, $CURR_FUNC;
 		unless ($str =~ /typedef/) {
-			warning "Recursing on $str [$CURR_FUNC]\n";
-			cscope_recurse $file, $str, $match, $field;
+			my ($idx, $type) = get_param($str, $match, $field);
+			unless (defined $stop) {
+				verbose "Recursing on $str [$CURR_FUNC]\n";
+				cscope_recurse $file, $str, $idx, $match, $field;
+			}
 		} else {
 			warning "WA cscope issue $str\n";
 		}
 	} else {
 		$name =~ s/\.c/\.o/;
-
-		trace "DECLARATION: $line:  $str | ($param [$match][$field])\n";
+		my $trace = "DECLARATION: $line:  $str | ($param [$match])";
+		$trace .= "[$field]" if defined $field;
+		trace "$trace\n";
 		if ($param =~ /&\w+/) {
 			warning "High Risk\n";
 			if ($str =~ /struct\s+(\w+)\s+\**\s*$match/) {
@@ -570,7 +586,9 @@ sub handle_declaration {
 			}
 		} elsif ($param =~ /\->/) {
 			warning "mapped fields ($param)\n";
-			verbose "$str|$match|$field;\n";
+			my $fld = 'NaN';
+			$fld = $field if defined $field;
+			verbose "$str|$match|$fld;\n";
 			if ($str =~ /=\s*(.*);/) {
 				warning "Handle assignment... $1\n";
 				identify_risk $str, $match, $field, $name;
@@ -579,16 +597,22 @@ sub handle_declaration {
 				warning "Handle declaration: $str\n";
 				identify_risk $str, $match, $field, $name;
 			} else {
+				my $fld = 'NaN';
+				$fld = $field if defined $field;
+
 				warning "Stopped on $str\n";
-				warning "$file, $str, $match, $field\n";
+				warning "$file, $str, $match, $fld\n";
 			}
 		} else {
 			if ($str =~ /$match\s*=|$match.*;/) {
 				#warning "Direct Map: $str\n";
 				identify_risk $str, $match, $field, $name;
 			} else {
+				my $fld = 'NaN';
+				$fld = $field if defined $field;
+
 				warning "Stopped on $str\n";
-				warning "$file, $str, $match, $field\n";
+				warning "$file, $str, $match, $fld\n";
 			}
 		}
 	}
@@ -597,20 +621,27 @@ sub handle_declaration {
 sub get_definition {
 	my ($file, $line, $param, $field) = @_;
 	my $match = $param;
+	my $stop = undef;
+	my $fld = 'NaN';
 
-	error "Recursion limit exceeded [DEF]: $CURR_DEF_DEPTH\n" and return
-							if $CURR_DEF_DEPTH > $RECURSION_DEPTH_LIMIT;
+	alert "Recursion limit exceeded [DEF]: $CURR_DEF_DEPTH\n" and return
+						if $CURR_DEF_DEPTH > $RECURSION_DEF_DEPTH_LIMIT;
 	panic("ERROR: Param not defined: $CURR_FILE: $line\n") unless defined $param;
 	$match =~ /&*(\w+)\W*/;
 	$match = $1; #if defined $1;
 	$match = $param unless defined $match;
 
-	unless (defined $field) {
+	## Field is irrelevant if:
+	## 1. & is used
+	## 2. Already defined -- need to check a->b is an array then field is irrlevant...
+	unless ((defined $field) or ($match =~ /&(\w+)\W*/)){
 		$field = $param;
-		$field =~ /\W*(\w+)$/;
-		$field = $1;
-		verbose "$param: $match -- $field\n";
+		$field =~ /[>\.](\w+)$/;
+		$field = $1 if defined $1;
 	}
+	$fld = $field unless defined $field;
+	verbose "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld\n";
+	trace "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld\n";
 
 	while ($line > 0) {
 		$line-- and next unless defined $$file[$line];
@@ -637,36 +668,55 @@ sub get_definition {
 				trace "FUNCTION: $str\n";
 			} else {
 				$str = extract_var $str[$#str];
-				trace "REPLACE: $match -> $str\n";
-				$match = $str;
-				#inc_def_depth;
-				#get_definition($file, $line -1, $str, $field);
-				#$CURR_DEF_DEPTH--;
+
+				if ($str =~ /skb.*\->data/) {
+					trace "RISK:[SKB] [$str]skb->data exposes sh_info\n";
+					#TODO: identify skb alloc funciions
+					return;
+				}
+				unless (($str eq 'NULL') or ($str =~ /^\d$/)) {
+					trace "REPLACE: $match -> $str\n";
+				#	$match = $str;
+					inc_def_depth;
+					get_definition($file, $line -1, $str, $field);
+					$CURR_DEF_DEPTH--;
+					$stop = 1;
+				}
 			}
 		}
 
-		if ($$file[$line] =~ /$match\s*[\->\.]+$field\s*=[^=]/) {
+		if (defined ($field) and
+				 ($$file[$line] =~ /$match\s*[\->\.]+$field\s*=[^=]/)) {
 			my $str = linearize_assignment $file, $line, $field;
 			trace "ASSIGNMENT [F]: $line : $str\n";
 
 			my @str = split /=/, $str;
+			$stop = 1;
 			#$str =~ s/^\([^\(\)]+\)//g;
 			#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
 			if ($str =~ /\w+\s*\(/) {
 				trace "FUNCTION: $str\n";
 			} else {
 				$str = extract_var $str[$#str];
-				trace "REPLACE: $field -> $str\n";
-				$field = $str;
-				$match = $str;
-				#inc_def_depth;
-				#get_definition($file, $line -1, $str);
-				#$CURR_DEF_DEPTH--;
+				if ($str =~ /skb.*\->data/) {
+					trace "RISK:[SKB] [$str]skb->data exposes sh_info\n";
+					#TODO: identify skb alloc funciions
+					return;
+				}
+				unless (($str eq 'NULL') or ($str =~ /^\d$/)) {
+					trace "REPLACE: $field -> $str\n";
+					#$field = $str;
+					#$match = $str;
+					#TODO: parse assignment to match/field
+					inc_def_depth;
+					get_definition($file, $line -1, $str);
+					$CURR_DEF_DEPTH--;
+				}
 			}
 		}
 
 		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
-			handle_declaration ($file, $line, $param, $match, $field);
+			handle_declaration ($file, $line, $param, $match, $field, $stop);
 			return;
 		}
 		$line--;
@@ -712,13 +762,19 @@ sub parse_file_line {
 		#TODO: identify skb alloc funciions
 		return;
 	}
-	if ($var =~ /[>\.].+[>\.]/) {
+	if ($var =~ /[>].+[>]/) {
 		trace "MANUAL: Please review manualy ($var)\n";
 		#TODO: Do handle these cases ~20/43
 		# grep -iP "manual" /tmp/out.txt |grep -P "[^\.>\w]\w+\->[\w\.]+\)"|wc -l
 		# one is HEAP, several with &....
 		return;
 	}
+	if ($var =~ /\+/ or $var =~ /\w\(/) {
+		trace "MANUAL: Please review manualy ($var)\n";
+		return;
+	}
+
+
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
 	get_definition $file, $line -2, $var, $field;

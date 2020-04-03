@@ -1,4 +1,6 @@
-# Mapping type: high risk, direct, indirect.
+# Mapping type: high risk, direct, .
+#.
+#indirect.
 # Direct:
 # Alloc, definition local.
 # Function call ...
@@ -20,3 +22,12 @@
 2. Handle case when pahole doesnt find (definition in diff file - use cscope)
 3. Handle typedef
 4. Handle define differently.
+
+5. Review Warnings/Errors
+6. Review Long stacks
+##########################3
+## Define Algo  for Match:Field.
+use cases:
+
+1. Handle only one layer of ->
+2. Any . are irrelevant as parent field is mapped ? unless is ptr. -- Follow till call
