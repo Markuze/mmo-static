@@ -22,6 +22,7 @@ my $RECURSION_DEF_DEPTH_LIMIT = 4;
 my $MAX_STACK_SIZE = 512;
 my $LOGS_DIR = '/tmp/logs';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
+my $VMLINUX = '/home/xlr8vgn/ubuntu-bionic/vmlinux';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
 my $TRY_CONFIG = undef;
@@ -50,6 +51,8 @@ my $argv = "@ARGV";
 getopts('vk:c', \%opts);
 
 $KERNEL_DIR = $opts{'k'} if defined $opts{'k'};
+$VMLINUX = "$KERNEL_DIR/vmlinux";
+
 $verbose = 1 if defined $opts{'v'};
 $TRY_CONFIG = 1 if defined $opts{'c'};
 
@@ -229,7 +232,7 @@ sub collect_cb {
 	if ($#out < 0) {
 		my @defs = qx(cscope -dL -1 $struct);
 		#alert "Please get the struct from other fiels [$struct]\n" unless
-					exists ($struct_cache{$struct});
+		#			exists ($struct_cache{$struct});
 		if ($#defs < 0) {
 			error "Cant locate the definition of $struct\n";
 		}
@@ -619,6 +622,79 @@ sub handle_declaration {
 	}
 }
 
+sub get_biggest_mapped {
+	my ($file, $line, $param) = @_;
+	my $match = $param;
+	my $stop = undef;
+	my $fld = 'NaN';
+	my $field;
+
+	panic("ERROR: Param not defined: $CURR_FILE: $line\n") unless defined $param;
+	$match =~ /&*(\w+)\W*/;
+	$match = $1; #if defined $1;
+	$match = $param unless defined $match;
+
+	unless ($param =~ /&(\w+)\W*/){
+		my $tmp = $param;
+		$field = $1 if ($tmp=~ /[>\.](\w+)\s*$/);
+	} else {
+		trace "Skipping Field: $match\n";
+	}
+	$fld = $field if defined $field;
+	verbose "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld\n";
+
+	while ($line > 0) {
+		$line-- and next unless defined $$file[$line];
+		$line-- and next if $$file[$line] =~ /^[\*\w\s]$/;
+		$line-- and next if $$file[$line] =~ /[%\"]+/;
+
+		if ($$file[$line] =~ /\*\//) {
+			#printf "Comment: $file[$l]\n";
+			until  ($$file[$line] =~ /\/\*/) {
+				$line--;
+			#       printf "Comment: $file[$l]\n";
+			}
+			$line--;
+                }
+
+		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
+			my $type = $1;
+
+			trace "$$file[$line]:$match:$type:\n";
+			if (defined $field) {
+				my @out;
+				my $name = $CURR_FILE;
+				$name =~ s/\.c/\.o/;
+				for ("$name", "$VMLINUX") {
+					@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
+					if ($#out > -1) {
+						$struct_cache{$type} = \@out;
+						last;
+					}
+					last unless -e $name;
+				}
+				if ($#out > -1) {
+					trace "struct $type Found\n";
+					my @def = grep (/\W$field\W/, @out);
+					if ($def[0] =~ /\W$field\[/) {
+						trace "Biggest: $type\n";
+					} else {
+						trace "Biggest: $def[0]\n";
+					}
+				}
+				else {
+					trace "ERR: Not Found $type: /usr/bin/pahole -C $type -EAa $name 2>/dev/null\n";
+				}
+			} else {
+				trace "Direct Map:Biggest: $type\n\n";
+			}
+			return;
+		}
+		$line--;
+	}
+
+}
+
 sub get_definition {
 	my ($file, $line, $param, $field) = @_;
 	my $match = $param;
@@ -761,11 +837,11 @@ sub parse_file_line {
 	}
 
 	trace "MAPPING: $line : $str | ($var) \n";
-	if ($var =~ /skb.*\->data/) {
-		trace "RISK:[SKB] skb->data exposes sh_info\n";
-		#TODO: identify skb alloc funciions
-		return;
-	}
+#if ($var =~ /skb.*\->data/) {
+#	trace "RISK:[SKB] skb->data exposes sh_info\n";
+#	#TODO: identify skb alloc funciions
+#	return;
+#}
 	if ($var =~ /[>].+[>]/) {
 		trace "MANUAL: Please review manualy ($var)\n";
 		#TODO: Do handle these cases ~20/43
@@ -781,7 +857,7 @@ sub parse_file_line {
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
-	get_definition $file, $line -2, $var, $field;
+	get_biggest_mapped $file, $line -1, $var, $field;
 }
 
 sub start_parsing {
