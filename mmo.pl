@@ -659,6 +659,13 @@ sub get_definition {
 			$line--;
                 }
 
+		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
+			## TODO: Just tell me if I need to hunt down the parent struct?
+			handle_declaration ($file, $line, $param, $match, $field, $stop);
+			#TODOL this alsm may be an assignment that needs to be evaluated.
+			return;
+		}
+
 		if ($$file[$line] =~ /\W+$match\s*=[^=]/) {
 			my $str = linearize_assignment $file, $line, $match;
 			trace "ASSIGNMENT [P]: $line : $str\n";
@@ -715,11 +722,6 @@ sub get_definition {
 					$CURR_DEF_DEPTH--;
 				}
 			}
-		}
-
-		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
-			handle_declaration ($file, $line, $param, $match, $field, $stop);
-			return;
 		}
 		$line--;
 	}
@@ -792,7 +794,7 @@ sub start_parsing {
 #		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
 			#$file = get_next() and next if $CURR_FILE =~ /staging/;
 			#new_trace "$CURR_FILE\n";
-			print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "Parsing: $CURR_FILE", RESET;
+			print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "Parsing: $CURR_FILE\n", RESET;
 			tie my @file, 'Tie::File', $CURR_FILE;
 
 			foreach (keys %{$file}) {

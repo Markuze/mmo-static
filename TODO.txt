@@ -18,16 +18,26 @@
 #consider hacking slub (https://lwn.net/Articles/229984/) to force mapping specific addresses.
 
 #####################
-1. Fix recursion on assignment....
+1. Fix recursion on assignment... add a stop clause :)
 2. Handle case when pahole doesnt find (definition in diff file - use cscope)
 3. Handle typedef
 4. Handle define differently.
-
-5. Review Warnings/Errors
-6. Review Long stacks
+5. Handle callback ptrs
+6. Review Warnings/Errors
+7. Review Long stacks
 ##########################3
 ## Define Algo  for Match:Field.
 use cases:
 
 1. Handle only one layer of ->
 2. Any . are irrelevant as parent field is mapped ? unless is ptr. -- Follow till call
+
+### ALgo:
+#1. Find defenition
+#	if ptr stop when alloc found.
+#	if local - forget fielD. - look for assignment: recurse.
+#	if direct - look for assignment : recurse
+#2. Find assignment. - recurse:
+
+1. Find Defenition : no recurse: Find biggest mapped struct.
+2. Search for assignment to biggest struct - has Field name: recurse.
