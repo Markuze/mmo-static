@@ -12,6 +12,6 @@ file="$CSCOPE_DB/cscope.files"
         -path "$LNX/sound*" -prune -o                                                           \
         -path "$LNX/firmware*" -prune -o                                                        \
         -path "$LNX/tools*" -prune -o                                                           \
-        -name "*.[chxsS]" -print > $file
+        -name "*.[ch]" -print > $file
     cd $CSCOPE_DB
     cscope -kqb

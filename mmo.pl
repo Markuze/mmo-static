@@ -217,12 +217,14 @@ sub collect_cb {
 	verbose "pahole -C $struct -EAa $file [$#out]\n";
 	if ($#out < 0) {
 		my @defs = qx(cscope -dL -1 $struct);
-		alert "Please get the struct from other fiels\n" unless
-					exists $struct_cache{$struct};
+		#alert "Please get the struct from other fiels [$struct]\n" unless
+					exists ($struct_cache{$struct});
 		if ($#defs < 0) {
-			error "Canr locate the definition of $struct\n";
+			error "Cant locate the definition of $struct\n";
 		}
 		$struct_cache{$struct} = undef;
+		#TODO: Please Fix, get the file with cscope
+		return 0;
 	}
 	if (defined $field) {
 		### is this a pointer
@@ -560,7 +562,7 @@ sub handle_declaration {
 				%struct_log = ();
 				my $cb = collect_cb("",$struct, $name);
 				if ($cb > 0) {
-					alert "Total Possible callbacks $cb\n";
+					# "Total Possible callbacks $cb\n";
 					trace "TEXT: High Risk: Total Possible callbacks $cb\n";
 				} else {
 					warning "Need to check if nested...\n";
