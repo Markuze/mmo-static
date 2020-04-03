@@ -17,8 +17,9 @@ use File::Spec::Functions;
 use Cwd;
 
 ##################### GLOBALS ##########################
-my $RECURSION_DEPTH_LIMIT = 8;
-my $RECURSION_DEF_DEPTH_LIMIT = 3;
+my $RECURSION_DEPTH_LIMIT = 4; #was once 6
+my $RECURSION_DEF_DEPTH_LIMIT = 4;
+my $MAX_STACK_SIZE = 512;
 my $LOGS_DIR = '/tmp/logs';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
@@ -75,7 +76,7 @@ sub trace {
 	$FH = *STDOUT unless defined $FH;
 	print $FH ITALIC, BRIGHT_BLUE, "${space}@_", RESET;
 	push @{$CURR_STACK}, "${space}@_" if defined $CURR_STACK;
-	panic("Stack overflow...!") if @{$CURR_STACK} > 256;
+	panic("Stack overflow...!") if @{$CURR_STACK} > $MAX_STACK_SIZE;
 }
 
 sub verbose {
@@ -467,7 +468,7 @@ sub cscope_recurse {
 	}
 
 	$field = undef if (defined $field and $match eq $field);
-	error "Recursion limit exceeded: $CURR_DEPTH\n" and return
+	alert "Recursion limit exceeded: $CURR_DEPTH\n" and return
 							if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	inc_depth;
 
@@ -634,12 +635,13 @@ sub get_definition {
 	## Field is irrelevant if:
 	## 1. & is used
 	## 2. Already defined -- need to check a->b is an array then field is irrlevant...
-	unless ((defined $field) or ($match =~ /&(\w+)\W*/)){
-		$field = $param;
-		$field =~ /[>\.](\w+)$/;
-		$field = $1 if defined $1;
+	unless ((defined $field) or ($param =~ /&(\w+)\W*/)){
+		my $tmp = $param;
+		$field = $1 if ($tmp=~ /[>\.](\w+)\s*$/);
+	} else {
+		trace "Skipping Field: $match\n";
 	}
-	$fld = $field unless defined $field;
+	$fld = $field if defined $field;
 	verbose "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld\n";
 	trace "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld\n";
 
