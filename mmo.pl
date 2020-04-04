@@ -675,7 +675,13 @@ sub handle_declaration {
 		}
 	}
 }
-
+###
+# Returns :a
+#	1. Def line
+#	2. Type of struct mapped (e.g, undef for char *)
+#	3. Name
+#	4. Field Name
+##
 sub get_biggest_mapped {
 	my ($file, $line, $param) = @_;
 	my $match = $param;
@@ -714,19 +720,23 @@ sub get_biggest_mapped {
 
 		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
 			my $type = $1;
+			my $str = linearize $file, $line;
+			my $fld = 'NaN';
 			#sometimes happens with global vars
 			$line-- and next if ($type eq 'return');
 
-			trace "$$file[$line]:$match:$type:\n";
+			$fld = $field if defined $field;
+			trace "$str|$type|$match|$fld\n";
 			if (defined $field) {
 				my $out = read_struct $type;
 
 				if (defined  $out) {
-					trace "struct $type Found\n";
+					verbose "struct $type Found\n";
 					my @def = grep (/\W$field\W/, @{$out});
 					#trace "Field: ($#def)$def[0]";
 					if ($def[0] =~ /\W$field\[/) {
 						trace "Field is not needed: $type\n";
+						$field = undef;
 					} else {
 						trace "Field is needed: $def[0]";
 					}
@@ -737,15 +747,15 @@ sub get_biggest_mapped {
 					for (@type) {
 						trace "cscope:$type:$_\n";
 					}
+					return undef;
 				}
-			} else {
-				trace "Direct Map: $type: Check if on HEAP\n";
 			}
-			return;
+			trace "return $str|$type|$match|$fld\n";
+			return $str, $type, $match, $fld;
 		}
 		$line--;
 	}
-
+	return undef;
 }
 
 sub get_definition {
