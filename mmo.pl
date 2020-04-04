@@ -32,6 +32,7 @@ my $TID;
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my %exported_symbols : shared = ();
+my %global_struct_cache : shared = ();
 
 my $CURR_FILE = undef; #per thread variable
 my $CURR_FUNC = undef; #per thread variable
@@ -45,6 +46,7 @@ my $CALLEE = undef; #per thread variable
 my $CURR_STACK = undef;
 my %struct_log = ();
 my %struct_cache = ();
+my %local_struct_cache = ();
 ####################### INIT #####################
 my %opts = ();
 my $argv = "@ARGV";
@@ -218,6 +220,58 @@ sub get_param {
 	verbose "$i> $type|::|$match\n";
 	return ($i, $type);
 }
+
+sub add_struct_to_global_cache {
+	my ($type, $arr) = @_;
+	lock %global_struct_cache;
+	$global_struct_cache{"$type"} = $arr;
+}
+
+sub add_to_struct_cache {
+	my ($type, $arr) = @_;
+	$local_struct_cache{"$type"} = $arr;
+	add_struct_to_global_cache $type, $arr;
+}
+
+sub get_struct_from_gloabl_cache {
+	my $type = shift;
+	lock %global_struct_cache;
+	return $global_struct_cache{"$type"};
+}
+
+sub get_struct_from_cache {
+	my $type = shift;
+	my $out;
+
+	$out = $local_struct_cache{"$type"};
+	return $out if defined $out;
+
+	$out = get_struct_from_gloabl_cache  $type;
+	return $out;
+}
+
+sub read_struct {
+	my $type = shift;
+	my $name = $CURR_FILE;
+	my @out : shared;
+
+	my $out = get_struct_from_cache $type;
+	return $out if defined $out;
+
+	$name =~ s/\.c/\.o/;
+	warning "File not Found $name\n" unless -e $name;
+
+	for ("$name", "$VMLINUX") {
+		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
+		if ($#out > -1) {
+			#$struct_cache{$type} = \@out;
+			$out = \@out;
+			add_to_struct_cache($type, \@out);
+			last;
+		}
+	}
+	return $out;
+}
 #################### FUNCTIONS ####################
 sub collect_cb {
 	my ($prfx, $struct, $file, $field) = @_;
@@ -265,7 +319,7 @@ sub collect_cb {
 			@def = grep (/$field\[/, @out);
 			if ($#def > -1) {
 				verbose "mapping of $field includes $struct\n";
-				trace "MApped array: $def[0]\n";
+				trace "Mapped array: $def[0]\n";
 			} else {
 				error "No such field: $field in $struct\n";
 			}
@@ -634,9 +688,10 @@ sub get_biggest_mapped {
 	$match = $1; #if defined $1;
 	$match = $param unless defined $match;
 
-	unless ($param =~ /&(\w+)\W*/){
+	unless ($param =~ /&(\w+)\W*/) {
 		my $tmp = $param;
-		$field = $1 if ($tmp=~ /[>\.](\w+)\s*$/);
+		$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*$/);
+		$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/);
 	} else {
 		trace "Skipping Field: $match\n";
 	}
@@ -659,34 +714,32 @@ sub get_biggest_mapped {
 
 		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
 			my $type = $1;
+			#sometimes happens with global vars
+			$line-- and next if ($type eq 'return');
 
 			trace "$$file[$line]:$match:$type:\n";
 			if (defined $field) {
-				my @out;
-				my $name = $CURR_FILE;
-				$name =~ s/\.c/\.o/;
-				for ("$name", "$VMLINUX") {
-					@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
-					if ($#out > -1) {
-						$struct_cache{$type} = \@out;
-						last;
-					}
-					last unless -e $name;
-				}
-				if ($#out > -1) {
+				my $out = read_struct $type;
+
+				if (defined  $out) {
 					trace "struct $type Found\n";
-					my @def = grep (/\W$field\W/, @out);
+					my @def = grep (/\W$field\W/, @{$out});
+					#trace "Field: ($#def)$def[0]";
 					if ($def[0] =~ /\W$field\[/) {
-						trace "Biggest: $type\n";
+						trace "Field is not needed: $type\n";
 					} else {
-						trace "Biggest: $def[0]\n";
+						trace "Field is needed: $def[0]";
 					}
 				}
 				else {
-					trace "ERR: Not Found $type: /usr/bin/pahole -C $type -EAa $name 2>/dev/null\n";
+					trace "ERR: Not Found $type\n";
+					my @type = qx(cscope -dL -1 $type);
+					for (@type) {
+						trace "cscope:$type:$_\n";
+					}
 				}
 			} else {
-				trace "Direct Map:Biggest: $type\n\n";
+				trace "Direct Map: $type: Check if on HEAP\n";
 			}
 			return;
 		}
@@ -849,9 +902,14 @@ sub parse_file_line {
 		# one is HEAP, several with &....
 		return;
 	}
-	if ($var =~ /\+/ or $var =~ /\w\(/) {
+	if ($var =~ /\w\(/) {
 		trace "MANUAL: Please review manualy ($var)\n";
 		return;
+	}
+	if ($var =~ /\+/) {
+		my @var = split /\+/, $var;
+		trace "Try: $var -> $var[0]\n";
+		$var = $var[0];
 	}
 
 
