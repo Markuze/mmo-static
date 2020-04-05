@@ -758,6 +758,62 @@ sub get_biggest_mapped {
 	return undef;
 }
 
+sub find_assignment {
+	my ($file, $line, $param, $field) = @_;
+	my $fld = 'NaN';
+	my $pattern;
+
+	alert "Recursion limit exceeded [DEF]: $CURR_DEF_DEPTH\n" and return
+						if $CURR_DEF_DEPTH > $RECURSION_DEF_DEPTH_LIMIT;
+	panic("ERROR: Param not defined: $CURR_FILE: $line\n") unless defined $param;
+
+#if (defined $field) {
+#	$pattern  = "$param\W+.*[>\.]$field";
+#} else {
+#	$pattern = $param;
+#}
+
+	while ($line > 0) {
+		$line = next_line($file, $line);
+
+		return undef if ($$file[$line] =~ /$CURR_FILE\s*\(/);
+
+		if ($$file[$line] =~ /\W+$param\s*=[^=]/) {
+			my $str = linearize_assignment $file, $line, $param;
+			trace "$str\n";
+			if (defined $field) {
+				if ($str =~ /$param\W+.*[>\.]$field/) {
+					trace "ASSIGNMENT [F]: $line : $str\n";
+				}
+			} else {
+				trace "ASSIGNMENT [P]: $line : $str\n";
+			}
+		}
+		$line--;
+	}
+}
+
+sub next_line {
+	my ($file, $line) = @_;
+
+	while (1) {
+		panic "$line not defined ($CURR_FILE)\n" unless defined $$file[$line];
+		$line-- and next if $$file[$line] =~ /^[\*\w\s]$/;
+		$line-- and next if $$file[$line] =~ /[%\"]+/;
+		last;
+	}
+
+	if ($$file[$line] =~ /\*\//) {
+		#printf "Comment: $file[$l]\n";
+		until  ($$file[$line] =~ /\/\*/) {
+			$line--;
+		#       printf "Comment: $file[$l]\n";
+		}
+		$line--;
+        }
+	return $line;
+}
+
 sub get_definition {
 	my ($file, $line, $param, $field) = @_;
 	my $match = $param;
@@ -785,18 +841,7 @@ sub get_definition {
 	trace "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld\n";
 
 	while ($line > 0) {
-		$line-- and next unless defined $$file[$line];
-		$line-- and next if $$file[$line] =~ /^[\*\w\s]$/;
-		$line-- and next if $$file[$line] =~ /[%\"]+/;
-
-		if ($$file[$line] =~ /\*\//) {
-			#printf "Comment: $file[$l]\n";
-			until  ($$file[$line] =~ /\/\*/) {
-				$line--;
-			#       printf "Comment: $file[$l]\n";
-			}
-			$line--;
-                }
+		$line = next_line $file, $line;
 
 		if ($$file[$line] =~ /\w+\s+\**\s*$match\W/) {
 			## TODO: Just tell me if I need to hunt down the parent struct?
@@ -867,6 +912,20 @@ sub get_definition {
 
 }
 
+sub assess_mapped {
+	my ($file, $line, $match, $map_field) = @_;
+	my ($def, $type, $var, $var_field) = get_biggest_mapped $file, $line, $match;
+
+	warning "Unhandled Case\n" and return unless defined $def;
+
+	if ($type eq 'sk_buff') {
+		trace "sk_buff: exposes shared info\n";
+		#TODO: Also search for  build skb
+		return;
+	}
+	find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
+}
+
 sub parse_file_line {
 	my ($file, $line, $field, $entry_num, $dir_entry) = @_;
 	$entry_num = 1 unless defined $entry_num; # second param
@@ -899,7 +958,7 @@ sub parse_file_line {
 		return ;
 	}
 
-	trace "MAPPING: $line : $str | ($var) \n";
+	trace "CALL: $line : $str | ($var) \n";
 #if ($var =~ /skb.*\->data/) {
 #	trace "RISK:[SKB] skb->data exposes sh_info\n";
 #	#TODO: identify skb alloc funciions
@@ -925,7 +984,7 @@ sub parse_file_line {
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
-	get_biggest_mapped $file, $line -1, $var, $field;
+	assess_mapped $file, $line -1, $var;
 }
 
 sub start_parsing {
