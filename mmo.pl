@@ -167,6 +167,7 @@ sub extract_var {
 		return $str;
 	}
 }
+
 sub extract_call_only {
 	my ($str, $func) = @_;
 	my $out = "";
@@ -272,6 +273,31 @@ sub read_struct {
 	}
 	return $out;
 }
+
+sub next_line {
+	my ($file, $line) = @_;
+
+	while (1) {
+		panic "$line not defined ($CURR_FILE)\n" unless defined $$file[$line];
+		$line-- and next if $$file[$line] =~ /^[\*\w\s]$/;
+		$line-- and next if $$file[$line] =~ /[%\"]+/;
+		last;
+	}
+
+	if ($$file[$line] =~ /\*\//) {
+		#printf "Comment: $file[$l]\n";
+		until  ($$file[$line] =~ /\/\*/) {
+			verbose "Comment: $$file[$line]\n";
+			$line--;
+		}
+		if  ($$file[$line] =~ /^\s*\/\*/) {
+			verbose "Comment: $$file[$line]\n";
+			$line--;
+		}
+        }
+	return $line;
+}
+
 #################### FUNCTIONS ####################
 sub collect_cb {
 	my ($prfx, $struct, $file, $field) = @_;
@@ -698,25 +724,15 @@ sub get_biggest_mapped {
 		my $tmp = $param;
 		$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*$/);
 		$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/);
-	} else {
-		trace "Skipping Field: $match\n";
 	}
+	#else {
+	#	trace "Skipping Field: $match\n";
+	#}
 	$fld = $field if defined $field;
 	verbose "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld\n";
 
 	while ($line > 0) {
-		$line-- and next unless defined $$file[$line];
-		$line-- and next if $$file[$line] =~ /^[\*\w\s]$/;
-		$line-- and next if $$file[$line] =~ /[%\"]+/;
-
-		if ($$file[$line] =~ /\*\//) {
-			#printf "Comment: $file[$l]\n";
-			until  ($$file[$line] =~ /\/\*/) {
-				$line--;
-			#       printf "Comment: $file[$l]\n";
-			}
-			$line--;
-                }
+		$line = next_line($file, $line);
 
 		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
 			my $type = $1;
@@ -726,31 +742,33 @@ sub get_biggest_mapped {
 			$line-- and next if ($type eq 'return');
 
 			$fld = $field if defined $field;
-			trace "$str|$type|$match|$fld\n";
+			verbose "$str|$type|$match|$fld\n";
+			trace "DECLARATION: $str|[($type)$match]\n";
 			if (defined $field) {
 				my $out = read_struct $type;
 
 				if (defined  $out) {
 					verbose "struct $type Found\n";
 					my @def = grep (/\W$field\W/, @{$out});
-					#trace "Field: ($#def)$def[0]";
+					verbose "Field: ($#def)$def[0]";
 					if ($def[0] =~ /\W$field\[/) {
-						trace "Field is not needed: $type\n";
+						verbose "Field is not needed: $type\n";
 						$field = undef;
-					} else {
-						trace "Field is needed: $def[0]";
+					}
+					else {
+						verbose "Field is needed: $def[0]";
 					}
 				}
 				else {
 					trace "ERR: Not Found $type\n";
 					my @type = qx(cscope -dL -1 $type);
 					for (@type) {
-						trace "cscope:$type:$_\n";
+						verbose "cscope:$type:$_\n";
 					}
 					return undef;
 				}
 			}
-			trace "return $str|$type|$match|$fld\n";
+			verbose "return $str|$type|$match|$fld\n";
 			return $str, $type, $match, $fld;
 		}
 		$line--;
@@ -791,27 +809,6 @@ sub find_assignment {
 		}
 		$line--;
 	}
-}
-
-sub next_line {
-	my ($file, $line) = @_;
-
-	while (1) {
-		panic "$line not defined ($CURR_FILE)\n" unless defined $$file[$line];
-		$line-- and next if $$file[$line] =~ /^[\*\w\s]$/;
-		$line-- and next if $$file[$line] =~ /[%\"]+/;
-		last;
-	}
-
-	if ($$file[$line] =~ /\*\//) {
-		#printf "Comment: $file[$l]\n";
-		until  ($$file[$line] =~ /\/\*/) {
-			$line--;
-		#       printf "Comment: $file[$l]\n";
-		}
-		$line--;
-        }
-	return $line;
 }
 
 sub get_definition {
@@ -923,7 +920,12 @@ sub assess_mapped {
 		#TODO: Also search for  build skb
 		return;
 	}
-	find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
+	# 1 . IF non void/char/etc.. is mapped: Look for callbacks
+	# 2. also please figure out if heap on top!.
+	# 3. else: (if no callbacks to)
+	my @assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
+	#MARK: 0. Gine a func that extracts the assignmebt ot $var $fielsd;
+	# Add loook for assignemnt with cscope
 }
 
 sub parse_file_line {
@@ -958,7 +960,6 @@ sub parse_file_line {
 		return ;
 	}
 
-	trace "CALL: $line : $str | ($var) \n";
 #if ($var =~ /skb.*\->data/) {
 #	trace "RISK:[SKB] skb->data exposes sh_info\n";
 #	#TODO: identify skb alloc funciions
@@ -977,9 +978,10 @@ sub parse_file_line {
 	}
 	if ($var =~ /\+/) {
 		my @var = split /\+/, $var;
-		trace "Try: $var -> $var[0]\n";
+		#trace "Try: $var -> $var[0]\n";
 		$var = $var[0];
 	}
+	trace "CALL: $line : $str | ($var) \n";
 
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
