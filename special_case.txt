@@ -1,3 +1,5 @@
+0. Collect CB is broken: tulip_private
+	net_device, sk_buff, void (*link_change)
 1.
 /home/xlr8vgn/ubuntu-bionic/drivers/net/ethernet/qlogic/qlge/qlge_main.c
 ql_map_send: 1372
