@@ -711,7 +711,7 @@ sub handle_declaration {
 sub get_biggest_mapped {
 	my ($file, $line, $param) = @_;
 	my $match = $param;
-	my $stop = undef;
+	my $f_type = undef;
 	my $fld = 'NaN';
 	my $field;
 
@@ -756,9 +756,9 @@ sub get_biggest_mapped {
 						$field = undef;
 					}
 					else {
-						$def[0] =~ /([\w\*]+)\s*$field/;
-						$type = $1 if defined $1;
-						verbose "Field is needed: $def[0]|$type\n";
+						$def[0] =~ /([\w\*\s]+)\s*$field/;
+						$f_type = $1 if defined $1;
+						verbose "Field is needed: $f_type|$def[0]";
 						#TODO : Extract field type:
 					}
 				}
@@ -772,7 +772,7 @@ sub get_biggest_mapped {
 				}
 			}
 			verbose "return $str|$type|$match|$fld\n";
-			return $str, $type, $match, $field;
+			return $str, $type, $match, $field,$f_type;
 		}
 		$line--;
 	}
@@ -802,11 +802,11 @@ sub find_assignment {
 	while ($line > 0) {
 		$line = next_line($file, $line);
 
-		return undef if ($$file[$line] =~ /$CURR_FILE\s*\(/);
+		return undef if ($$file[$line] =~ /$CURR_FUNC\s*\(/);
 
-		if ($$file[$line] =~ /\W+$pattern\s*=[^=]/) {
+		if ($$file[$line] =~ /\s+$pattern\s*=[^=]/) {
 			my $str = linearize_assignment $file, $line, $param;
-			verbose "$str|$param|$field\n";
+			verbose "$str|$param|$fld\n";
 			if (defined $field) {
 				if ($str =~ /$param.*[>\.]$field/) {
 					trace "ASSIGNMENT [F]: $line : $str\n";
@@ -921,7 +921,7 @@ sub get_definition {
 
 sub assess_mapped {
 	my ($file, $line, $match, $map_field) = @_;
-	my ($def, $type, $var, $var_field) = get_biggest_mapped $file, $line, $match;
+	my ($def, $type, $var, $var_field, $f_type) = get_biggest_mapped $file, $line, $match;
 
 	warning "Unhandled Case\n" and return unless defined $def;
 
