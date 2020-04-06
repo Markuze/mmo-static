@@ -227,12 +227,17 @@ sub get_param {
 sub extract_assignmet {
 	my $str = shift;
 	my @str = split /=/, $str;
+
 	#$str =~ s/^\([^\(\)]+\)//g;
 	#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
 	warning "Unhandled assignment: $str\n" and return if ($#str > 1);
 
 	if ($str[$#str] =~ /\w+\s*\(/) {
-		trace "FUNCTION: $str\n";
+		if ($str[$#str] =~ /alloc|get.*_page/) {
+			trace "SLUB: allocation $str[$#str]\n";
+		} else {
+			trace "UNHANDLED FUNCTION: $str\n";
+		}
 	} else {
 		$str = extract_var $str[$#str];
 
@@ -243,10 +248,12 @@ sub extract_assignmet {
 		}
 		unless (($str eq 'NULL') or ($str =~ /^\d$/)) {
 			trace "REPLACE: $str\n";
+			return 1;
 		} else {
 			trace "Trivial: $str\n";
 		}
 	}
+	return;
 }
 
 sub add_struct_to_global_cache {
@@ -954,6 +961,7 @@ sub get_definition {
 sub handle_biggest_type {
 	my ($file, $type) = @_;
 	my $tmp = $type;
+	my $rc;
 
 	$tmp =~ s/\*//;
 
@@ -963,9 +971,10 @@ sub handle_biggest_type {
 	if ($#base > -1) {
 		verbose "Base Type: $type\n";
 	} else {
-		return collect_cb '', $type, $file;
+		$rc =  collect_cb '', $type, $file;
+		trace "Collected $rc Callbacks...\n";
 	}
-	return 0;
+	return $rc;
 }
 
 sub assess_mapped {
@@ -986,12 +995,12 @@ sub assess_mapped {
 	# 3. else: (if no callbacks to)
 	my $assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
 	foreach (@{$assignments}) {
-		extract_assignmet $_;
-		trace "Recurse on assignment: $_\n";
+		my $rc = extract_assignmet $_;
+		trace "TODO: Recurse on assignment: $_\n" if defined $rc;
 	}
 	#Need a XOR relstionship
 	if ($def =~ /$CURR_FUNC/) {
-		trace "Recursing to callers\n";
+		trace "Recursing to callers: $def\n";
 	} else {
 		verbose "NO recurse: $def\n";
 	}

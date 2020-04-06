@@ -1,0 +1,25 @@
+1.
+/home/xlr8vgn/ubuntu-bionic/drivers/net/ethernet/qlogic/qlge/qlge_main.c
+ql_map_send: 1372
+
+Extract def - confusion when struct and var sahre name
+
+2.
+spk_tail_pointer -trivial exchange
+
+3.
+Grep all skb->data and report.
+
+4. 
+sbp2 - Make sure it works
+
+5. 
+nvme fc - when recursions enabled.
+
+6.
+Heap mappings
+
+7.
+adapter_t -
+7.1 pahole - grep
+7.2 cscope - read
