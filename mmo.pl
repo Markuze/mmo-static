@@ -47,7 +47,9 @@ my $CURR_STACK = undef;
 my %struct_log = ();
 my %struct_cache = ();
 my %local_struct_cache = ();
+
 ####################### INIT #####################
+my @BASE_TYPES = qw(void char unsigned long int u8 uint9_t);
 my %opts = ();
 my $argv = "@ARGV";
 getopts('vk:c', \%opts);
@@ -220,6 +222,31 @@ sub get_param {
 	panic "HEmm... $str|$match|<$i>" if ($#vars == -1 or $i > $#vars);
 	verbose "$i> $type|::|$match\n";
 	return ($i, $type);
+}
+
+sub extract_assignmet {
+	my $str = shift;
+	my @str = split /=/, $str;
+	#$str =~ s/^\([^\(\)]+\)//g;
+	#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
+	warning "Unhandled assignment: $str\n" and return if ($#str > 1);
+
+	if ($str[$#str] =~ /\w+\s*\(/) {
+		trace "FUNCTION: $str\n";
+	} else {
+		$str = extract_var $str[$#str];
+
+		if ($str =~ /skb.*\->data/) {
+			trace "RISK:[SKB] [$str]skb->data exposes sh_info\n";
+			#TODO: identify skb alloc funciions
+			return;
+		}
+		unless (($str eq 'NULL') or ($str =~ /^\d$/)) {
+			trace "REPLACE: $str\n";
+		} else {
+			trace "Trivial: $str\n";
+		}
+	}
 }
 
 sub add_struct_to_global_cache {
@@ -772,6 +799,7 @@ sub get_biggest_mapped {
 				}
 			}
 			verbose "return $str|$type|$match|$fld\n";
+			$f_type = $type unless defined $f_type;
 			return $str, $type, $match, $field,$f_type;
 		}
 		$line--;
@@ -783,6 +811,7 @@ sub find_assignment {
 	my ($file, $line, $param, $field) = @_;
 	my $fld = 'NaN';
 	my $pattern = $param;
+	my @assignments;
 
 	if (defined $field) {
 		$fld = $field;
@@ -802,23 +831,26 @@ sub find_assignment {
 	while ($line > 0) {
 		$line = next_line($file, $line);
 
-		return undef if ($$file[$line] =~ /$CURR_FUNC\s*\(/);
+		return \@assignments if ($$file[$line] =~ /$CURR_FUNC\s*\(/);
 
-		if ($$file[$line] =~ /\s+$pattern\s*=[^=]/) {
+		if ($$file[$line] =~ /[\s\*]$pattern\s*=[^=]/) {
 			my $str = linearize_assignment $file, $line, $param;
 			verbose "$str|$param|$fld\n";
 			if (defined $field) {
 				if ($str =~ /$param.*[>\.]$field/) {
-					trace "ASSIGNMENT [F]: $line : $str\n";
+					verbose "ASSIGNMENT [F]: $line : $str\n";
+					push @assignments, $str;
 				} else {
 					verbose "False Positive: $str|$param|$field\n";
 				}
 			} else {
-				trace "ASSIGNMENT [P]: $line : $str\n";
+				verbose "ASSIGNMENT [P]: $line : $str\n";
+				push @assignments, $str;
 			}
 		}
 		$line--;
 	}
+	return \@assignments;
 }
 
 sub get_definition {
@@ -919,6 +951,23 @@ sub get_definition {
 
 }
 
+sub handle_biggest_type {
+	my ($file, $type) = @_;
+	my $tmp = $type;
+
+	$tmp =~ s/\*//;
+
+	verbose "CB in $type ($tmp)\n";
+	my @base = grep (/$tmp/, @BASE_TYPES);
+
+	if ($#base > -1) {
+		verbose "Base Type: $type\n";
+	} else {
+		return collect_cb '', $type, $file;
+	}
+	return 0;
+}
+
 sub assess_mapped {
 	my ($file, $line, $match, $map_field) = @_;
 	my ($def, $type, $var, $var_field, $f_type) = get_biggest_mapped $file, $line, $match;
@@ -930,10 +979,22 @@ sub assess_mapped {
 		#TODO: Also search for  build skb
 		return;
 	}
+
+	handle_biggest_type($file, $f_type);
 	# 1 . IF non void/char/etc.. is mapped: Look for callbacks
 	# 2. also please figure out if heap on top!.
 	# 3. else: (if no callbacks to)
-	my @assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
+	my $assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
+	foreach (@{$assignments}) {
+		extract_assignmet $_;
+		trace "Recurse on assignment: $_\n";
+	}
+	#Need a XOR relstionship
+	if ($def =~ /$CURR_FUNC/) {
+		trace "Recursing to callers\n";
+	} else {
+		verbose "NO recurse: $def\n";
+	}
 	#MARK: 0. Gine a func that extracts the assignmebt ot $var $fielsd;
 	# Add loook for assignemnt with cscope
 }
