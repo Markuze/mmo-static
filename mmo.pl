@@ -287,11 +287,11 @@ sub next_line {
 	if ($$file[$line] =~ /\*\//) {
 		#printf "Comment: $file[$l]\n";
 		until  ($$file[$line] =~ /\/\*/) {
-			verbose "Comment: $$file[$line]\n";
+			#verbose "Comment: $$file[$line]\n";
 			$line--;
 		}
 		if  ($$file[$line] =~ /^\s*\/\*/) {
-			verbose "Comment: $$file[$line]\n";
+			#verbose "Comment: $$file[$line]\n";
 			$line--;
 		}
         }
@@ -743,7 +743,7 @@ sub get_biggest_mapped {
 
 			$fld = $field if defined $field;
 			verbose "$str|$type|$match|$fld\n";
-			trace "DECLARATION: $str|[($type)$match]\n";
+			trace "DECLARATION[$line]: $str|[($type)$match]\n";
 			if (defined $field) {
 				my $out = read_struct $type;
 
@@ -756,7 +756,10 @@ sub get_biggest_mapped {
 						$field = undef;
 					}
 					else {
-						verbose "Field is needed: $def[0]";
+						$def[0] =~ /([\w\*]+)\s*$field/;
+						$type = $1 if defined $1;
+						verbose "Field is needed: $def[0]|$type\n";
+						#TODO : Extract field type:
 					}
 				}
 				else {
@@ -769,7 +772,7 @@ sub get_biggest_mapped {
 				}
 			}
 			verbose "return $str|$type|$match|$fld\n";
-			return $str, $type, $match, $fld;
+			return $str, $type, $match, $field;
 		}
 		$line--;
 	}
@@ -779,7 +782,12 @@ sub get_biggest_mapped {
 sub find_assignment {
 	my ($file, $line, $param, $field) = @_;
 	my $fld = 'NaN';
-	my $pattern;
+	my $pattern = $param;
+
+	if (defined $field) {
+		$fld = $field;
+		$pattern = $field;
+	}
 
 	alert "Recursion limit exceeded [DEF]: $CURR_DEF_DEPTH\n" and return
 						if $CURR_DEF_DEPTH > $RECURSION_DEF_DEPTH_LIMIT;
@@ -790,18 +798,20 @@ sub find_assignment {
 #} else {
 #	$pattern = $param;
 #}
-
+	verbose "HERE: $CURR_FILE, |$param|$fld|$pattern|\n";
 	while ($line > 0) {
 		$line = next_line($file, $line);
 
 		return undef if ($$file[$line] =~ /$CURR_FILE\s*\(/);
 
-		if ($$file[$line] =~ /\W+$param\s*=[^=]/) {
+		if ($$file[$line] =~ /\W+$pattern\s*=[^=]/) {
 			my $str = linearize_assignment $file, $line, $param;
-			trace "$str\n";
+			verbose "$str|$param|$field\n";
 			if (defined $field) {
-				if ($str =~ /$param\W+.*[>\.]$field/) {
+				if ($str =~ /$param.*[>\.]$field/) {
 					trace "ASSIGNMENT [F]: $line : $str\n";
+				} else {
+					verbose "False Positive: $str|$param|$field\n";
 				}
 			} else {
 				trace "ASSIGNMENT [P]: $line : $str\n";
