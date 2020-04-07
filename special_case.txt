@@ -1,4 +1,4 @@
-0. Collect CB is broken: tulip_private
+0. Collect CB is broken: tulip_private, mtk_aes_map
 	net_device, sk_buff, void (*link_change)
 1.
 /home/xlr8vgn/ubuntu-bionic/drivers/net/ethernet/qlogic/qlge/qlge_main.c
@@ -7,7 +7,7 @@ ql_map_send: 1372
 Extract def - confusion when struct and var sahre name
 
 2.
-spk_tail_pointer -trivial exchange
+spk_tail_pointer,skb_put -trivial exchange
 
 3.
 Grep all skb->data and report.

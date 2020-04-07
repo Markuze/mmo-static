@@ -49,7 +49,7 @@ my %struct_cache = ();
 my %local_struct_cache = ();
 
 ####################### INIT #####################
-my @BASE_TYPES = qw(void char unsigned long int u8 uint9_t);
+my @BASE_TYPES = qw(void char unsigned long int u8 u16 u32 u64 uint8_t uint16_t);
 my %opts = ();
 my $argv = "@ARGV";
 getopts('vk:c', \%opts);
@@ -162,7 +162,7 @@ sub add_exported {
 
 sub extract_var {
 	my $str = shift;
-	if ($str =~ /([\w&>\-]+)\s*[\[;\+]/) {
+	if ($str =~ /([\w&>\-\.]+)\s*[\[;\+]/) {
 		return $1;
 	} else {
 		warning "No Match...[$str]\n";
@@ -248,7 +248,7 @@ sub extract_assignmet {
 		}
 		unless (($str eq 'NULL') or ($str =~ /^\d$/)) {
 			trace "REPLACE: $str\n";
-			return 1;
+			return $str;
 		} else {
 			trace "Trivial: $str\n";
 		}
@@ -286,8 +286,8 @@ sub get_struct_from_cache {
 }
 
 sub read_struct {
-	my $type = shift;
-	my $name = $CURR_FILE;
+	my ($type, $name) = @_;
+	$name = $CURR_FILE unless defined $name;
 	my @out : shared;
 
 	my $out = get_struct_from_cache $type;
@@ -332,6 +332,40 @@ sub next_line {
 	return $line;
 }
 
+sub get_cb_rec {
+	my ($prfx, $struct_log, $type, $file_hint) = @_;
+	my %struct_log;
+	my $cb_count = 0;
+	my $struct;
+
+	$struct_log = \%struct_log unless defined $struct_log;
+	${$struct_log}{$type} = undef;
+
+	$struct = read_struct $type, $file_hint;
+	warning "Cant process $type for callbacks\n"  and return 0 unless defined $struct;
+	my @cb = grep(/^\s*\w+\**\s+\(/, @{$struct});
+	if (@cb > 0) {
+		my $num = @cb;
+		if ($prfx eq '') {
+		        trace(" $num Callbacks exposed in ${prfx}$type\n");
+		}
+		#print "@cb\n" if defined $verbose;
+		$cb_count += $num;
+	}
+
+	my @st = grep(/^\s*struct\s+(\w+)\s+\*+/, @{$struct});
+	#\s*\*+\s*(\w+)
+	foreach (@st) {
+	        /^\s*struct\s+(\w+)\s+\*+/;
+		verbose "processing $1\n";
+	        next if exists ${$struct_log}{$1};
+	        ${$struct_log}{$1} = undef;
+	        #print "struct $1\n";
+	        $cb_count += collect_cb("${prfx}$type->", $struct_log, $1, $file_hint);
+	}
+	return $cb_count;
+
+}
 #################### FUNCTIONS ####################
 sub collect_cb {
 	my ($prfx, $struct, $file, $field) = @_;
@@ -964,6 +998,9 @@ sub handle_biggest_type {
 	my $rc;
 
 	$tmp =~ s/\*//;
+	$tmp =~ s/\s*const\s*//;
+	$tmp =~ s/^\s*//;
+	$tmp =~ s/\s*$//;
 
 	verbose "CB in $type ($tmp)\n";
 	my @base = grep (/$tmp/, @BASE_TYPES);
@@ -971,7 +1008,7 @@ sub handle_biggest_type {
 	if ($#base > -1) {
 		verbose "Base Type: $type\n";
 	} else {
-		$rc =  collect_cb '', $type, $file;
+		$rc =  get_cb_rec '', undef, $type;
 		trace "Collected $rc Callbacks...\n";
 	}
 	return $rc;
@@ -996,7 +1033,13 @@ sub assess_mapped {
 	my $assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
 	foreach (@{$assignments}) {
 		my $rc = extract_assignmet $_;
-		trace "TODO: Recurse on assignment: $_\n" if defined $rc;
+		if (defined $rc) {
+			trace "Recurse on assignment: $_\n" if defined $rc;
+			inc_def_depth;
+			assess_mapped($file, $line -1, $rc);
+			$CURR_DEF_DEPTH--;
+			return;
+		}
 	}
 	#Need a XOR relstionship
 	if ($def =~ /$CURR_FUNC/) {
@@ -1046,14 +1089,22 @@ sub parse_file_line {
 #	return;
 #}
 	if ($var =~ /[>].+[>]/) {
-		trace "MANUAL: Please review manualy ($var)\n";
+		if ($var =~ /skb.*data/) {
+			trace "skb exposes shared_info\n";
+		} else {
+			trace "MANUAL: Please review manualy ($var)\n";
+		}
 		#TODO: Do handle these cases ~20/43
 		# grep -iP "manual" /tmp/out.txt |grep -P "[^\.>\w]\w+\->[\w\.]+\)"|wc -l
 		# one is HEAP, several with &....
 		return;
 	}
-	if ($var =~ /\w\(/) {
-		trace "MANUAL: Please review manualy ($var)\n";
+	if ($var =~ /(\w+)\(/) {
+		if ($1 =~ /skb_put|skb_tail/) { #TODO: add a list of skb->data functions
+			trace "skb exposes shared_info\n";
+		} else {
+			trace "MANUAL: Please review manualy ($var)\n";
+		}
 		return;
 	}
 	if ($var =~ /\+/) {
