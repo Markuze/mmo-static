@@ -32,6 +32,7 @@ my $TID;
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my %exported_symbols : shared = ();
+my %assignment_funcs : shared = ();
 my %global_struct_cache : shared = ();
 
 my $CURR_FILE = undef; #per thread variable
@@ -160,6 +161,12 @@ sub add_exported {
 	$exported_symbols{"$name"} = 1;
 }
 
+sub add_assignment_func {
+	my $name = shift;
+	lock %assignment_funcs;
+	$assignment_funcs{"$name"}++;
+}
+
 sub extract_var {
 	my $str = shift;
 	if ($str =~ /([\w&>\-\.]+)\s*[\[;\+]/) {
@@ -235,8 +242,17 @@ sub extract_assignmet {
 	if ($str[$#str] =~ /\w+\s*\(/) {
 		if ($str[$#str] =~ /alloc|get.*_page/) {
 			trace "SLUB: allocation $str[$#str]\n";
+		} elsif ($str[$#str] =~ /scsi_cmd_priv\s*\((.*)\)/) {
+			trace "WARNING: scsi_cmnd_priv: exposes scsi_cmnd: $str\n";
+			add_assignment_func 'scsi_cmnd_priv';
+			#TODO: Any point in tracing?
 		} else {
-			trace "UNHANDLED FUNCTION: $str\n";
+			my $func = 'nan';
+			if ($str[$#str] =~ /(\w+)\s*\(/) {
+				$func = $1;
+			}
+			trace "UNHANDLED FUNCTION: $str:$func\n";
+			add_assignment_func $func;
 		}
 	} else {
 		$str = extract_var $str[$#str];
@@ -1094,7 +1110,7 @@ sub parse_file_line {
 #	return;
 #}
 	if ($var =~ /[>].+[>]/) {
-		if ($var =~ /skb.*data/) {
+		if ($str =~ /skb.*\->data/) {
 			trace "skb exposes shared_info\n";
 		} else {
 			trace "MANUAL: Please review manualy ($var)\n";
@@ -1222,6 +1238,9 @@ foreach my $file (keys %cscope_lines) {
 			print GREEN, $str ,RESET;
 		}
 	}
+}
+foreach my $func (sort {$assignment_funcs{$a} <=> $assignment_funcs{$b}} keys %assignment_funcs) {
+	print BLUE, "$func:$assignment_funcs{$func}\n";
 }
 print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET;
 #start_parsing;
