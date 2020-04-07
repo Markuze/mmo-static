@@ -809,6 +809,11 @@ sub get_biggest_mapped {
 			#sometimes happens with global vars
 			$line-- and next if ($type eq 'return');
 
+			if ($type eq 'struct') {
+				verbose "HEURISTIC: ($match) $$file[$line]: \n";
+				## Happens when struct name == var name
+				$type =$match;
+			}
 			$fld = $field if defined $field;
 			verbose "$str|$type|$match|$fld\n";
 			trace "DECLARATION[$line]: $str|[($type)$match]\n";

@@ -4,6 +4,7 @@
 /home/xlr8vgn/ubuntu-bionic/drivers/net/ethernet/qlogic/qlge/qlge_main.c
 ql_map_send: 1372
 
+fore200e
 Extract def - confusion when struct and var sahre name
 
 2.
