@@ -206,7 +206,7 @@ sub extract_call_only {
 }
 
 sub get_param {
-	my ($string, $match, $field) = @_;
+	my ($string, $match) = @_;
 	my $str = extract_call_only $string, $CURR_FUNC;
 
 	verbose ("get_idx: $string| $str|$match|\n");
@@ -621,7 +621,7 @@ sub cscope_array {
 }
 
 sub cscope_recurse {
-	my ($file, $str, $idx, $match, $field) = @_;
+	my ($file, $str, $idx, $field) = @_;
 	#my $idx = get_param_idx($str, $match, $field);
 	my @cscope = qx(cscope -dL -3 $CURR_FUNC);
 
@@ -634,7 +634,6 @@ sub cscope_recurse {
 		return;
 	}
 
-	$field = undef if (defined $field and $match eq $field);
 	alert "Recursion limit exceeded: $CURR_DEPTH\n" and return
 							if $CURR_DEPTH > $RECURSION_DEPTH_LIMIT;
 	inc_depth;
@@ -1082,6 +1081,7 @@ sub assess_mapped {
 	# 1 . IF non void/char/etc.. is mapped: Look for callbacks
 	# 2. also please figure out if heap on top!.
 	# 3. else: (if no callbacks to)
+	$map_field = $var_field unless defined $map_field;
 	my $assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
 	foreach (@{$assignments}) {
 		my $rc = extract_assignmet $_;
@@ -1093,9 +1093,14 @@ sub assess_mapped {
 			return;
 		}
 	}
+	my $fld = 'NaN';
+	$fld = $map_field if defined $map_field;
+	verbose "[$CURR_FUNC]$def|$match|$var|$fld\n";
 	#Need a XOR relstionship
-	if ($def =~ /$CURR_FUNC/) {
-		trace "Recursing to callers: $def\n";
+	if ($def =~ /$CURR_FUNC\s*\(/) {
+		my ($idx, $type) = get_param($def, $var);
+		trace "Recursing to callers: $def: $idx\n";
+		cscope_recurse $file, $def, $idx, $map_field;
 	} else {
 		verbose "NO recurse: $def\n";
 	}
@@ -1127,20 +1132,27 @@ sub parse_file_line {
 		$vars[$#vars] =~ s/\).*//;
 		panic("ERROR: NO Match: $linear\n") unless ($#vars > -1 or $entry_num > $#vars);
 		panic("ERROR: Undefined: $linear [$entry_num/$#vars]\n") unless (defined $vars[$entry_num]);
-		$vars[$entry_num] =~ s/\s+//g;
+		$vars[$entry_num] =~ s/^\s+//g;
+		$vars[$entry_num] =~ s/\s+$//g;
 		$var = $vars[$entry_num];
 	}
 	if ($var eq 'NULL') {
 		trace "ERROR: Invalid path $str\n";
 		return ;
 	}
-
-	trace "MAPPIMG: $line : $str | ($var) \n";
+	if ($var =~ /\s+/) {
+		my @var = split /\s+/, $var;
+		trace "$var -> $var[0] ($#var)\n";
+		$var = $var[0];
+	}
+	my $fld = 'NaN';
+	$fld = $field if defined $field;
+	trace "MAPPIMG: $line : $str | ($var) ($fld)\n";
 
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
-	assess_mapped $file, $line -1, $var;
+	assess_mapped $file, $line -1, $var, $field;
 }
 
 sub start_parsing {

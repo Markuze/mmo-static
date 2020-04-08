@@ -1,3 +1,10 @@
+1. Fix get struct
+	a. rm vmlinux untill all is working
+	b. add cscope use.
+2. debug recursion
+
+
+
 # Mapping type: high risk, direct, .
 #.
 #indirect.
