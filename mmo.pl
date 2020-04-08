@@ -1037,6 +1037,37 @@ sub handle_biggest_type {
 
 sub assess_mapped {
 	my ($file, $line, $match, $map_field) = @_;
+
+#if ($var =~ /skb.*\->data/) {
+#	trace "RISK:[SKB] skb->data exposes sh_info\n";
+#	#TODO: identify skb alloc funciions
+#	return;
+#}
+	if ($match =~ /[>].+[>]/) {
+		if ($match =~ /skb.*\->data/) {
+			trace "skb exposes shared_info\n";
+		} else {
+			trace "MANUAL: Please review manualy ($match)\n";
+		}
+		#TODO: Do handle these cases ~20/43
+		# grep -iP "manual" /tmp/out.txt |grep -P "[^\.>\w]\w+\->[\w\.]+\)"|wc -l
+		# one is HEAP, several with &....
+		return;
+	}
+	if ($match =~ /(\w+)\(/) {
+		if ($1 =~ /skb_put|skb_tail/) { #TODO: add a list of skb->data functions
+			trace "skb exposes shared_info\n";
+		} else {
+			trace "MANUAL: Please review manualy ($match)\n";
+		}
+		return;
+	}
+	if ($match =~ /\+/) {
+		my @var = split /\+/, $match;
+		#trace "Try: $var -> $var[0]\n";
+		$match = $var[0];
+	}
+
 	my ($def, $type, $var, $var_field, $f_type) = get_biggest_mapped $file, $line, $match;
 
 	warning "Unhandled Case\n" and return unless defined $def;
@@ -1104,36 +1135,7 @@ sub parse_file_line {
 		return ;
 	}
 
-#if ($var =~ /skb.*\->data/) {
-#	trace "RISK:[SKB] skb->data exposes sh_info\n";
-#	#TODO: identify skb alloc funciions
-#	return;
-#}
-	if ($var =~ /[>].+[>]/) {
-		if ($str =~ /skb.*\->data/) {
-			trace "skb exposes shared_info\n";
-		} else {
-			trace "MANUAL: Please review manualy ($var)\n";
-		}
-		#TODO: Do handle these cases ~20/43
-		# grep -iP "manual" /tmp/out.txt |grep -P "[^\.>\w]\w+\->[\w\.]+\)"|wc -l
-		# one is HEAP, several with &....
-		return;
-	}
-	if ($var =~ /(\w+)\(/) {
-		if ($1 =~ /skb_put|skb_tail/) { #TODO: add a list of skb->data functions
-			trace "skb exposes shared_info\n";
-		} else {
-			trace "MANUAL: Please review manualy ($var)\n";
-		}
-		return;
-	}
-	if ($var =~ /\+/) {
-		my @var = split /\+/, $var;
-		#trace "Try: $var -> $var[0]\n";
-		$var = $var[0];
-	}
-	trace "CALL: $line : $str | ($var) \n";
+	trace "MAPPIMG: $line : $str | ($var) \n";
 
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
