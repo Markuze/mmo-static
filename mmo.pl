@@ -1037,7 +1037,7 @@ sub handle_biggest_type {
 }
 
 sub assess_mapped {
-	my ($file, $line, $match, $map_field) = @_;
+	my ($file, $line, $match, $map_field, $aliaces) = @_;
 
 #if ($var =~ /skb.*\->data/) {
 #	trace "RISK:[SKB] skb->data exposes sh_info\n";
@@ -1079,7 +1079,13 @@ sub assess_mapped {
 		return;
 	}
 
-	handle_biggest_type($file, $f_type);
+	my $cb_count = handle_biggest_type($file, $f_type);
+	if (defined $cb_count and $cb_count > 0) {
+		trace "VULNERABILITY FOUND :$cb_count callbacks:\n";
+		#TODO:  a. check if heap/slab,
+		# 	b. dont care if bigger  struct is mapped.
+		return;
+	}
 	# 1 . IF non void/char/etc.. is mapped: Look for callbacks
 	# 2. also please figure out if heap on top!.
 	# 3. else: (if no callbacks to)
@@ -1088,11 +1094,16 @@ sub assess_mapped {
 	foreach (@{$assignments}) {
 		my $rc = extract_assignmet $_;
 		if (defined $rc) {
-			trace "Recurse on assignment: $_\n" if defined $rc;
-			inc_def_depth;
-			assess_mapped($file, $line -1, $rc);
-			$CURR_DEF_DEPTH--;
-			return;
+			unless (exists ${$aliaces}{$rc}) {
+				${$aliaces}{$rc} = undef;
+				trace "Recurse on assignment: $_ ($rc)\n" if defined $rc;
+				inc_def_depth;
+				assess_mapped($file, $line -1, $rc, $aliaces);
+				$CURR_DEF_DEPTH--;
+				return;
+			} else {
+				trace "Endless Looop: $_ ($rc)\n" if defined $rc;
+			}
 		}
 	}
 	my $fld = 'NaN';
@@ -1116,6 +1127,7 @@ sub parse_file_line {
 	$dir_entry = 3 unless defined $dir_entry; # forth param
 
 	my $var;
+	my %aliaces = ();
 	my $str = linearize $file, $line -1;
 	if ($str =~ /^#define\s*(\w+)/) {
 		alert "ADD: Please Add $1 to ROOT_FUNCS\n";
@@ -1154,7 +1166,7 @@ sub parse_file_line {
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
-	assess_mapped $file, $line -1, $var, $field;
+	assess_mapped $file, $line -1, $var, $field, \%aliaces;
 }
 
 sub start_parsing {
