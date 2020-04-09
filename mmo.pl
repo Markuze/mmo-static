@@ -1114,7 +1114,7 @@ sub assess_mapped {
 				${$aliaces}{$rc} = undef;
 				trace "Recurse on assignment: $_ ($rc)\n" if defined $rc;
 				inc_def_depth;
-				assess_mapped($file, $line -1, $rc, $aliaces);
+				assess_mapped($file, $line -1, $rc, $map_field, $aliaces);
 				$CURR_DEF_DEPTH--;
 				return;
 			} else {
