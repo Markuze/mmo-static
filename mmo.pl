@@ -290,6 +290,13 @@ sub get_struct_from_gloabl_cache {
 	return $global_struct_cache{"$type"};
 }
 
+sub exists_in_global_cache {
+	my $type = shift;
+	lock %global_struct_cache;
+	return 1 if  exists $global_struct_cache{"$type"};
+	return undef;
+}
+
 sub get_struct_from_cache {
 	my $type = shift;
 	my $out;
@@ -299,6 +306,13 @@ sub get_struct_from_cache {
 
 	$out = get_struct_from_gloabl_cache  $type;
 	return $out;
+}
+
+sub exists_in_cache {
+	my $type = shift;
+
+	return 1 if exists $local_struct_cache{"$type"};
+	return exists_in_global_cache $type;
 }
 
 sub read_struct {
@@ -312,6 +326,7 @@ sub read_struct {
 	$name =~ s/\.c/\.o/;
 	warning "File not Found $name\n" unless -e $name;
 
+	return undef if (defined exists_in_cache($type));
 	for ("$name", "$VMLINUX") {
 	#for ("$name") {
 		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
@@ -322,6 +337,7 @@ sub read_struct {
 			last;
 		}
 	}
+	add_to_struct_cache($type, undef);
 	#TODO: Read from cscope if not found
 	return $out;
 }
