@@ -17,8 +17,8 @@ use File::Spec::Functions;
 use Cwd;
 
 ##################### GLOBALS ##########################
-my $RECURSION_DEPTH_LIMIT = 4; #was once 6
-my $RECURSION_DEF_DEPTH_LIMIT = 4;
+my $RECURSION_DEPTH_LIMIT = 6; #was once 6
+my $RECURSION_DEF_DEPTH_LIMIT = 6;
 my $MAX_STACK_SIZE = 512;
 my $LOGS_DIR = '/tmp/logs';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
@@ -313,6 +313,7 @@ sub read_struct {
 	warning "File not Found $name\n" unless -e $name;
 
 	for ("$name", "$VMLINUX") {
+	#for ("$name") {
 		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
 		if ($#out > -1) {
 			#$struct_cache{$type} = \@out;
@@ -321,6 +322,7 @@ sub read_struct {
 			last;
 		}
 	}
+	#TODO: Read from cscope if not found
 	return $out;
 }
 
@@ -373,11 +375,11 @@ sub get_cb_rec {
 	#\s*\*+\s*(\w+)
 	foreach (@st) {
 	        /^\s*struct\s+(\w+)\s+\*+/;
-		verbose "processing $1\n";
 	        next if exists ${$struct_log}{$1};
+		verbose "processing $1\n";
 	        ${$struct_log}{$1} = undef;
 	        #print "struct $1\n";
-	        $cb_count += collect_cb("${prfx}$type->", $struct_log, $1, $file_hint);
+	        $cb_count += get_cb_rec("${prfx}$type->", $struct_log, $1, $file_hint);
 	}
 	return $cb_count;
 
@@ -876,7 +878,7 @@ sub find_assignment {
 
 	if (defined $field) {
 		$fld = $field;
-		$pattern = $field;
+		$pattern = "$param.+$field";
 	}
 
 	alert "Recursion limit exceeded [DEF]: $CURR_DEF_DEPTH\n" and return
