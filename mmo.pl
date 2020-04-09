@@ -871,9 +871,9 @@ sub get_biggest_mapped {
 				else {
 					trace "ERR: Not Found $type\n";
 					my @type = qx(cscope -dL -1 $type);
-					for (@type) {
-						verbose "cscope:$type:$_\n";
-					}
+				#for (@type) {
+				#	verbose "cscope:$type:$_\n";
+				#}
 					return undef;
 				}
 			}
