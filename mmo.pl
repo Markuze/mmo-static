@@ -169,7 +169,7 @@ sub add_assignment_func {
 
 sub extract_var {
 	my $str = shift;
-	if ($str =~ /\s+/) {
+	if ($str =~ /\+/) {
 		my @str = split /\s+/, $str;
 		trace "$str -> $str[0] ($#str)\n";
 		$str = $str[0];
@@ -332,7 +332,7 @@ sub read_struct {
 	warning "File not Found $name\n" unless -e $name;
 
 	if (defined exists_in_cache($type)) {
-		trace "$type exists in cache\n";
+		verbose "$type exists in cache\n";
 		return undef;
 	}
 
@@ -341,12 +341,12 @@ sub read_struct {
 		if ($#out > -1) {
 			$out = \@out;
 			add_to_struct_cache($type, \@out);
-			last;
+			return $out;
 		}
 	}
 	add_to_struct_cache($type, undef);
 	#TODO: Read from cscope if not found
-	return $out;
+	return undef;
 }
 
 sub next_line {
@@ -863,7 +863,7 @@ sub assess_mapped {
 	my $fld = 'NaN';
 	$fld = $map_field if defined $map_field;
 
-	trace "$CURR_FUNC:$line:$match:$fld\n";
+	trace "ASSESSING: $CURR_FUNC:$line:$match:$fld\n";
 #if ($var =~ /skb.*\->data/) {
 #	trace "RISK:[SKB] skb->data exposes sh_info\n";
 #	#TODO: identify skb alloc funciions
@@ -921,13 +921,13 @@ sub assess_mapped {
 		if (defined $rc) {
 			unless (exists ${$aliaces}{$rc}) {
 				${$aliaces}{$rc} = undef;
-				trace "Recurse on assignment: $_ ($rc)\n" if defined $rc;
+				trace "ASSIGNMENT: Recurse on assignment: $_ ($rc)\n" if defined $rc;
 				inc_def_depth;
 				assess_mapped($file, $line -1, $rc, $map_field, $aliaces);
 				$CURR_DEF_DEPTH--;
 				return;
 			} else {
-				trace "Endless Looop: $_ ($rc)\n" if defined $rc;
+				trace "DBG: Endless Looop: $_ ($rc)\n" if defined $rc;
 			}
 		}
 	}
@@ -936,7 +936,7 @@ sub assess_mapped {
 	#Need a XOR relstionship
 	if ($def =~ /$CURR_FUNC\s*\(/) {
 		my ($idx, $type) = get_param($def, $var);
-		trace "Recursing to callers: $def: $idx\n";
+		trace "REC: Recursing to callers: $def: $idx\n";
 		cscope_recurse $file, $def, $idx, $map_field;
 	} else {
 		verbose "NO recurse: $def\n";
@@ -975,18 +975,18 @@ sub parse_file_line {
 		$var = $vars[$entry_num];
 	}
 	if ($var eq 'NULL') {
-		trace "ERROR: Invalid path $str\n";
+		trace "DBG: ERROR: Invalid path $str\n";
 		return ;
 	}
 	if ($var =~ /\s+/) {
 		my @var = split /\s+/, $var;
-		trace "$var -> $var[0] ($#var)\n";
+		trace "DBG: $var -> $var[0] ($#var)\n";
 		$var = $var[0];
 	}
 	my $fld = 'NaN';
 	$fld = $field if defined $field;
-	trace "MAPPIMG: $line : $str | ($var) ($fld)\n";
-
+	trace "CALL:$CURR_FUNC:$line) $str\n";
+	trace "Searching for: $var [$fld]\n";
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
