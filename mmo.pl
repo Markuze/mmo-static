@@ -897,24 +897,26 @@ sub assess_mapped {
 	my ($def, $type, $var, $var_field, $f_type) = get_biggest_mapped $file, $line, $match;
 
 	warning "Unhandled Case\n" and return unless defined $def;
+	unless (defined $map_field) {
+		if ($type eq 'sk_buff') {
+			trace "sk_buff: exposes shared info\n";
+			#TODO: Also search for  build skb
+			return;
+		}
 
-	if ($type eq 'sk_buff') {
-		trace "sk_buff: exposes shared info\n";
-		#TODO: Also search for  build skb
-		return;
-	}
-
-	my $cb_count = handle_biggest_type($file, $f_type);
-	if (defined $cb_count and $cb_count > 0) {
-		trace "VULNERABILITY FOUND :$cb_count callbacks:\n";
-		#TODO:  a. check if heap/slab,
-		# 	b. dont care if bigger  struct is mapped.
-		return;
+		my $cb_count = handle_biggest_type($file, $f_type);
+		if (defined $cb_count and $cb_count > 0) {
+			trace "VULNERABILITY FOUND :$cb_count callbacks:\n";
+			#TODO:  a. check if heap/slab,
+			# 	b. dont care if bigger  struct is mapped.
+			return;
+		}
 	}
 	# 1 . IF non void/char/etc.. is mapped: Look for callbacks
 	# 2. also please figure out if heap on top!.
 	# 3. else: (if no callbacks to)
 	$map_field = $var_field unless defined $map_field;
+	my $stop_recurse = 0;
 	my $assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
 	foreach (@{$assignments}) {
 		my $rc = extract_assignmet $_;
@@ -925,7 +927,7 @@ sub assess_mapped {
 				inc_def_depth;
 				assess_mapped($file, $line -1, $rc, $map_field, $aliaces);
 				$CURR_DEF_DEPTH--;
-				return;
+				$stop_recurse++;
 			} else {
 				trace "DBG: Endless Looop: $_ ($rc)\n" if defined $rc;
 			}
@@ -934,12 +936,14 @@ sub assess_mapped {
 	$fld = $map_field if defined $map_field;
 	verbose "[$CURR_FUNC]$def|$match|$var|$fld\n";
 	#Need a XOR relstionship
-	if ($def =~ /$CURR_FUNC\s*\(/) {
-		my ($idx, $type) = get_param($def, $var);
-		trace "REC: Recursing to callers: $def: $idx\n";
-		cscope_recurse $file, $def, $idx, $map_field;
-	} else {
-		verbose "NO recurse: $def\n";
+	unless ($stop_recurse > 0) {
+		if ($def =~ /$CURR_FUNC\s*\(/) {
+			my ($idx, $type) = get_param($def, $var);
+			trace "REC: Recursing to callers: $def: $idx\n";
+			cscope_recurse $file, $def, $idx, $map_field;
+		} else {
+			verbose "NO recurse: $def\n";
+		}
 	}
 	#MARK: 0. Gine a func that extracts the assignmebt ot $var $fielsd;
 	# Add loook for assignemnt with cscope
