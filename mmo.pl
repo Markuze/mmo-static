@@ -84,7 +84,7 @@ sub trace {
 	$FH = *STDOUT unless defined $FH;
 	print $FH ITALIC, BRIGHT_BLUE, "${space}@_", RESET;
 	push @{$CURR_STACK}, "${space}@_" if defined $CURR_STACK;
-	panic("Stack overflow...!") if @{$CURR_STACK} > $MAX_STACK_SIZE;
+	panic("Stack overflow...!\n") if @{$CURR_STACK} > $MAX_STACK_SIZE;
 }
 
 sub verbose {
@@ -169,6 +169,11 @@ sub add_assignment_func {
 
 sub extract_var {
 	my $str = shift;
+	if ($str =~ /\s+/) {
+		my @str = split /\s+/, $str;
+		trace "$str -> $str[0] ($#str)\n";
+		$str = $str[0];
+	}
 	if ($str =~ /([\w&>\-\.]+)\s*[\[;\+]/) {
 		return $1;
 	} else {
@@ -326,12 +331,14 @@ sub read_struct {
 	$name =~ s/\.c/\.o/;
 	warning "File not Found $name\n" unless -e $name;
 
-	return undef if (defined exists_in_cache($type));
+	if (defined exists_in_cache($type)) {
+		trace "$type exists in cache\n"
+		return undef;
+	}
+
 	for ("$name", "$VMLINUX") {
-	#for ("$name") {
 		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
 		if ($#out > -1) {
-			#$struct_cache{$type} = \@out;
 			$out = \@out;
 			add_to_struct_cache($type, \@out);
 			last;
@@ -1054,7 +1061,10 @@ sub handle_biggest_type {
 
 sub assess_mapped {
 	my ($file, $line, $match, $map_field, $aliaces) = @_;
+	my $fld = 'NaN';
+	$fld = $map_field if defined $map_field;
 
+	trace "$CURR_FUNC:$line:$match:$fld\n";
 #if ($var =~ /skb.*\->data/) {
 #	trace "RISK:[SKB] skb->data exposes sh_info\n";
 #	#TODO: identify skb alloc funciions
@@ -1122,7 +1132,6 @@ sub assess_mapped {
 			}
 		}
 	}
-	my $fld = 'NaN';
 	$fld = $map_field if defined $map_field;
 	verbose "[$CURR_FUNC]$def|$match|$var|$fld\n";
 	#Need a XOR relstionship
