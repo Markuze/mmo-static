@@ -871,7 +871,7 @@ sub assess_mapped {
 #}
 	if ($match =~ /[>].+[>]/) {
 		if ($match =~ /skb.*\->data/) {
-			trace "skb exposes shared_info\n";
+			trace "SKB: exposes shared_info\n";
 		} else {
 			trace "MANUAL: Please review manualy ($match)\n";
 		}
@@ -882,7 +882,7 @@ sub assess_mapped {
 	}
 	if ($match =~ /(\w+)\(/) {
 		if ($1 =~ /skb_put|skb_tail/) { #TODO: add a list of skb->data functions
-			trace "skb exposes shared_info\n";
+			trace "SKB: exposes shared_info\n";
 		} else {
 			trace "MANUAL: Please review manualy ($match)\n";
 		}
@@ -899,7 +899,7 @@ sub assess_mapped {
 	warning "Unhandled Case\n" and return unless defined $def;
 	unless (defined $map_field) {
 		if ($type eq 'sk_buff') {
-			trace "sk_buff: exposes shared info\n";
+			trace "SKB: exposes shared_info\n";
 			#TODO: Also search for  build skb
 			return;
 		}
@@ -943,6 +943,12 @@ sub assess_mapped {
 			cscope_recurse $file, $def, $idx, $map_field;
 		} else {
 			verbose "NO recurse: $def\n";
+		}
+	} else {
+		if (defined $map_field) {
+			trace "MISSING: assignment\n";
+		} else {
+			trace "HEAP: mapped\n";
 		}
 	}
 	#MARK: 0. Gine a func that extracts the assignmebt ot $var $fielsd;

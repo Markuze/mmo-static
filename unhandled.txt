@@ -1,0 +1,7 @@
+1.
+/home/xlr8vgn/ubuntu-bionic/drivers/net/wireless/intel/iwlwifi/pcie/tx.c
+ tb1_addr = ((u8 *)&dev_cmd->hdr) + IWL_FIRST_TB_SIZE;
+#Verify that $var =~ /^[&\->\.\w\d]+$/
+
+2. Grep for unhandled
+3. Cscope structs
