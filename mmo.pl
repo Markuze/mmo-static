@@ -945,7 +945,9 @@ sub assess_mapped {
 			verbose "NO recurse: $def\n";
 		}
 	} else {
-		if (defined $map_field) {
+		if ($def =~ /$CURR_FUNC\s*\(/) {
+			return;
+		} elsif (defined $map_field) {
 			trace "MISSING: assignment\n";
 		} else {
 			trace "HEAP: mapped\n";
