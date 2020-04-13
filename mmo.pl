@@ -908,6 +908,10 @@ sub assess_mapped {
 	$fld = $map_field if defined $map_field;
 
 	verbose "ASSESSING: $CURR_FUNC:$line:$match:$fld\n";
+	if ($fld eq 'LocalRxBuffer') {
+		trace "SPECIAL CASE: $fld is a special case\n";
+		return;
+	}
 #if ($var =~ /skb.*\->data/) {
 #	trace "RISK:[SKB] skb->data exposes sh_info\n";
 #	#TODO: identify skb alloc funciions
