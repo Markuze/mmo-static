@@ -51,7 +51,7 @@ my %struct_cache = ();
 my %local_struct_cache = ();
 
 ####################### INIT #####################
-my @BASE_TYPES = qw(void char unsigned long int u8 u16 u32 u64 uint8_t uint16_t);
+my @BASE_TYPES = qw(void char unsigned long int u8 u16 u32 u64 uint8_t uint16_t __le16);
 my %opts = ();
 my $argv = "@ARGV";
 getopts('vk:c', \%opts);
@@ -77,7 +77,7 @@ sub usage {
 sub new_verbose {
 	$FH = *STDOUT unless defined $FH;
 	print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "@_", RESET;
-	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
+	#push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
 }
 
 sub trace {
@@ -170,10 +170,23 @@ sub add_assignment_func {
 
 sub extract_var {
 	my $str = shift;
+
+	verbose "$str\n";
+	$str =~ s/\([\w\s]+\*\s*\)//;
+	$str =~ s/\(\s*unsigned\s+long\s*\)//;
+	verbose "$str\n";
+
 	if ($str =~ /\+/) {
+		$str =~ s/^\s+//;
+		$str =~ s/\s+$//;
+
 		my @str = split /\s+/, $str;
 		trace "$str -> $str[0] ($#str)\n";
 		$str = $str[0];
+		if ($str =~ /^\((.*)\)$/) {
+			$str = $1;
+		}
+		panic "shit...[$str]\n" unless $str =~ /^[\w&>\-\.]+$/;
 	}
 	if ($str =~ /([\w&>\-\.]+)\s*[\[;\+]/) {
 		return $1;
@@ -351,14 +364,18 @@ sub read_struct {
 	}
 	#cscope for not compiled
 	my @out3 = qx(cscope -dL -1 $type);
+	verbose "cscope -dL -1 $type";
 	for (@out3) {
+		chomp;
 		verbose "read_struct[C]: $_\n";
 	}
 	#typedef e.g, adapter_t
 	@out = qx(/usr/bin/pahole -EAa $name 2>/dev/null);
+	verbose "/usr/bin/pahole -EAa $name 2>/dev/null: [$type]";
 	if (@out) {
-		my @out2 = grep $type, @out;
+		my @out2 = grep(/$type/, @out);
 		for (@out2) {
+			chomp;
 			verbose "read_struct[P]: $_\n";
 		}
 		return undef;
@@ -760,11 +777,12 @@ sub get_biggest_mapped {
 	while ($line > 0) {
 		$line = next_line($file, $line);
 
-		if ($$file[$line] =~ /^\s+struct\s+(\w+)[\s\*],+$match\s*[;,]/)){
-			trace "Possible match: $$file[$line]\n";
+		#if ($$file[$line] =~ /^\s+struct\s+(\w+)\s+[\s\*\w\,]+,\s*$match\s*[;,]/) {
+		if ($$file[$line] =~ /\W$match\s*[,;]/) {
+			verbose "Possible match: $$file[$line]\n";
 		}
 
-		if (($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
+		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
 			my $type = $1;
 			my $str = linearize $file, $line;
 			my $fld = 'NaN';
@@ -868,6 +886,7 @@ sub handle_biggest_type {
 
 	$tmp =~ s/\*//;
 	$tmp =~ s/\s*const\s*//;
+	$tmp =~ s/\s*unsigned\s*//;
 	$tmp =~ s/^\s*//;
 	$tmp =~ s/\s*$//;
 
