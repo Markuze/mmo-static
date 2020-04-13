@@ -343,12 +343,28 @@ sub read_struct {
 
 	for ("$name", "$VMLINUX") {
 		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
-		if ($#out > -1) {
+		if (@out) {
 			$out = \@out;
 			add_to_struct_cache($type, \@out);
 			return $out;
 		}
 	}
+	#cscope for not compiled
+	my @out3 = qx(cscope -dL -1 $type);
+	for (@out3) {
+		verbose "read_struct[C]: $_\n";
+	}
+	#typedef e.g, adapter_t
+	@out = qx(/usr/bin/pahole -EAa $name 2>/dev/null);
+	if (@out) {
+		my @out2 = grep $type, @out;
+		for (@out2) {
+			verbose "read_struct[P]: $_\n";
+		}
+		return undef;
+	}
+
+
 	add_to_struct_cache($type, undef);
 	#TODO: Read from cscope if not found
 	return undef;
