@@ -260,7 +260,7 @@ sub extract_assignmet {
 
 	#$str =~ s/^\([^\(\)]+\)//g;
 	#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
-	warning "Unhandled assignment: $str\n" and return if ($#str > 1);
+	warning "Unhandled assignment: $str\n" and return (undef, 1) if ($#str > 1);
 
 	if ($str[$#str] =~ /\W(\w+)\s*\(/) {
 		my @type_C = grep(/$1/, @type_C_funcs);
@@ -364,6 +364,7 @@ sub read_struct {
 		return undef;
 	}
 
+	verbose "extracting $type\n";
 	for ("$name", "$VMLINUX") {
 		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
 		if (@out) {
@@ -456,8 +457,18 @@ sub get_cb_rec {
 }
 
 sub dump_local_stats {
+	my ($i, $u);
+
 	foreach (sort {$a cmp $b} keys %local_stats) {
 		verbose "$_: $local_stats{$_}\n";
+	}
+
+	verbose "Local struct Cache:\n";
+	foreach (sort {$a cmp $b} keys %local_struct_cache) {
+		my $defined = 'Yes';
+		$i++;
+		$u++ and $defined = 'No' unless defined $local_struct_cache{$_};
+		verbose "$i,$u]$_: $defined\n";
 	}
 }
 #################### FUNCTIONS ####################
@@ -889,13 +900,13 @@ sub find_assignment {
 			verbose "$str|$param|$fld\n";
 			if (defined $field) {
 				if ($str =~ /$param.*[>\.]$field/) {
-					verbose "ASSIGNMENT [F]: $line : $str\n";
+					trace "ASSIGNMENT [F]: $line : $str\n";
 					push @assignments, $str;
 				} else {
 					verbose "False Positive: $str|$param|$field\n";
 				}
 			} else {
-				verbose "ASSIGNMENT [P]: $line : $str\n";
+				trace "ASSIGNMENT [P]: $line : $str\n";
 				push @assignments, $str;
 			}
 		}
@@ -923,7 +934,6 @@ sub handle_biggest_type {
 		verbose "Base Type: $type\n";
 	} else {
 		$rc =  get_cb_rec '', undef, $type;
-		trace "Collected $rc Callbacks...\n";
 	}
 	return $rc;
 }
@@ -980,7 +990,7 @@ sub assess_mapped {
 
 		my $cb_count = handle_biggest_type($file, $f_type);
 		if (defined $cb_count and $cb_count > 0) {
-			trace "VULNERABILITY FOUND :$cb_count callbacks:\n";
+			trace "VULNERABILITY FOUND :$cb_count callbacks in $f_type\n";
 			#TODO:  a. check if heap/slab,
 			# 	b. dont care if bigger  struct is mapped.
 			return;
@@ -994,8 +1004,8 @@ sub assess_mapped {
 	my $assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
 	foreach (@{$assignments}) {
 		my ($rc, $stop) = extract_assignmet $_;
-		verbose "$rc|$stop\n";
 		if (defined $rc) {
+			verbose "$rc|$stop\n";
 			unless (exists ${$aliaces}{$rc}) {
 				${$aliaces}{$rc} = undef;
 				trace "ASSIGNMENT: Recurse on assignment: $_ ($rc)\n" if defined $rc;
@@ -1005,8 +1015,10 @@ sub assess_mapped {
 			} else {
 				trace "DBG: Endless Looop: $_ ($rc)\n" if defined $rc;
 			}
+		} else {
+			verbose "NaN|$stop\n";
 		}
-		$stop_recurse |= $stop;
+		$stop_recurse += $stop;
 	}
 	$fld = $map_field if defined $map_field;
 	verbose "[$CURR_FUNC]$def|$match|$var|$fld\n";
