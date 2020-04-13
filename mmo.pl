@@ -180,12 +180,16 @@ sub extract_var {
 		$str =~ s/^\s+//;
 		$str =~ s/\s+$//;
 
+		my $idx = 0;
 		my @str = split /\s+/, $str;
-		trace "$str -> $str[0] ($#str)\n";
-		$str = $str[0];
-		if ($str =~ /^\((.*)\)$/) {
-			$str = $1;
-		}
+		verbose "$str -> $str[$idx] ($#str)\n";
+
+		while ($str[$idx] =~ /^\s*\(+\s*$/) {$idx++;};
+
+		$str = $str[$idx];
+		$str =~ s/^\(+//;
+		$str =~ s/\)+$//;
+
 		panic "shit...[$str]\n" unless $str =~ /^[\w&>\-\.]+$/;
 	}
 	if ($str =~ /([\w&>\-\.]+)\s*[\[;\+]/) {
