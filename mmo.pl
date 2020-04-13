@@ -29,6 +29,7 @@ my $TRY_CONFIG = undef;
 my $FH;
 my $TID;
 
+my @type_C_funcs = qw(page_frag_alloc); #TODO: recurse and collect callers untill all are exported.
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my %exported_symbols : shared = ();
@@ -73,7 +74,7 @@ sub usage {
         die "bad command: $0 $argv\nusage: $0\n";
 }
 
-sub new_trace {
+sub new_verbose {
 	$FH = *STDOUT unless defined $FH;
 	print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "@_", RESET;
 	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
@@ -244,11 +245,15 @@ sub extract_assignmet {
 	#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
 	warning "Unhandled assignment: $str\n" and return if ($#str > 1);
 
-	if ($str[$#str] =~ /\w+\s*\(/) {
-		if ($str[$#str] =~ /alloc|get.*_page/) {
+	if ($str[$#str] =~ /\W(\w+)\s*\(/) {
+		my @type_C = grep(/$1/, @type_C_funcs);
+		if (@type_C) {
+			trace "VULNERABILITY: Type C Vulnerability: may expose shared_info\n";
+		}
+		elsif ($str[$#str] =~ /alloc|get.*_page/) {
 			trace "SLUB: allocation $str[$#str]\n";
 		} elsif ($str[$#str] =~ /scsi_cmd_priv\s*\((.*)\)/) {
-			trace "WARNING: scsi_cmnd_priv: exposes scsi_cmnd: $str\n";
+			trace "VULNERABILITY: scsi_cmnd_priv: exposes scsi_cmnd: $str\n";
 			add_assignment_func 'scsi_cmnd_priv';
 			#TODO: Any point in tracing?
 		} else {
@@ -739,7 +744,11 @@ sub get_biggest_mapped {
 	while ($line > 0) {
 		$line = next_line($file, $line);
 
-		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
+		if ($$file[$line] =~ /^\s+struct\s+(\w+)[\s\*],+$match\s*[;,]/)){
+			trace "Possible match: $$file[$line]\n";
+		}
+
+		if (($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
 			my $type = $1;
 			my $str = linearize $file, $line;
 			my $fld = 'NaN';
@@ -753,7 +762,7 @@ sub get_biggest_mapped {
 			}
 			$fld = $field if defined $field;
 			verbose "$str|$type|$match|$fld\n";
-			trace "DECLARATION[$line]: $str|[($type)$match]\n";
+			trace "DECLARATION[$CURR_FUNC:$line]: $str\n";
 			if (defined $field) {
 				my $out = read_struct $type;
 
@@ -863,7 +872,7 @@ sub assess_mapped {
 	my $fld = 'NaN';
 	$fld = $map_field if defined $map_field;
 
-	trace "ASSESSING: $CURR_FUNC:$line:$match:$fld\n";
+	verbose "ASSESSING: $CURR_FUNC:$line:$match:$fld\n";
 #if ($var =~ /skb.*\->data/) {
 #	trace "RISK:[SKB] skb->data exposes sh_info\n";
 #	#TODO: identify skb alloc funciions
@@ -998,7 +1007,7 @@ sub parse_file_line {
 	my $fld = 'NaN';
 	$fld = $field if defined $field;
 	trace "CALL:$CURR_FUNC:$line) $str\n";
-	trace "Searching for: $var [$fld]\n";
+	verbose "Searching for: $var [$fld]\n";
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
 	#verbose "ptr $vars[$entry_num] dir $vars[$dir_entry]\n";
@@ -1014,7 +1023,7 @@ sub start_parsing {
 		$CURR_FILE = delete ${$file}{'file'};
 #		if ($CURR_FILE =~ /scsi|firewire|nvme/) {
 			#$file = get_next() and next if $CURR_FILE =~ /staging/;
-			#new_trace "$CURR_FILE\n";
+			#new_verbose "$CURR_FILE\n";
 			print $FH UNDERLINE, BOLD, BRIGHT_WHITE, "Parsing: $CURR_FILE\n", RESET;
 			tie my @file, 'Tie::File', $CURR_FILE;
 
@@ -1028,7 +1037,7 @@ sub start_parsing {
 				$CURR_DEF_DEPTH = 0;
 				${$file}{$_} = \@trace;
 				$CURR_STACK = \@trace;
-				new_trace "$CURR_FUNC: $_\n";
+				new_verbose "$CURR_FUNC: $_\n";
 				parse_file_line \@file, $_;
 			}
 #		}

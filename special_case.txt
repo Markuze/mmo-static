@@ -1,15 +1,5 @@
 0. Collect CB is broken: tulip_private, mtk_aes_map
 	net_device, sk_buff, void (*link_change)
-1.
-/home/xlr8vgn/ubuntu-bionic/drivers/net/ethernet/qlogic/qlge/qlge_main.c
-ql_map_send: 1372
-
-fore200e
-Extract def - confusion when struct and var sahre name
-
-2.
-spk_tail_pointer,skb_put -trivial exchange
-
 3.
 Grep all skb->data and report.
 
@@ -21,6 +11,26 @@ nvme fc - when recursions enabled.
 
 6.
 Heap mappings
+
+
+TODO:
+1.
+/home/xlr8vgn/ubuntu-bionic/drivers/net/ethernet/qlogic/qlge/qlge_main.c
+ql_map_send: 1372
+
+fore200e
+Extract def - confusion when struct and var sahre name
+
+/home/xlr8vgn/ubuntu-bionic/drivers/mmc/host/sdhci.c:3622 <ARRAY>
+        DECLARATION[3843]: max_clk = host->max_clk * host->clk_mul;|[(max_clk)host]
+
+/home/xlr8vgn/ubuntu-bionic/drivers/net/vmxnet3/vmxnet3_drv.c:3326
+Check if netdev_priv is exposed?
+
+mtk_eth_soc.c:990
+u8 *var, *search;
+2.
+spk_tail_pointer,skb_put -trivial exchange
 
 7.
 adapter_t -
