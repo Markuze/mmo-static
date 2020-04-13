@@ -49,9 +49,9 @@ my $CURR_STACK = undef;
 my %struct_log = ();
 my %struct_cache = ();
 my %local_struct_cache = ();
-
+my %local_stats = ();
 ####################### INIT #####################
-my @BASE_TYPES = qw(void char unsigned long int u8 u16 u32 u64 uint8_t uint16_t __le16);
+my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 uint8_t uint16_t __le16);
 my %opts = ();
 my $argv = "@ARGV";
 getopts('vk:c', \%opts);
@@ -61,7 +61,6 @@ $VMLINUX = "$KERNEL_DIR/vmlinux";
 
 $verbose = 1 if defined $opts{'v'};
 $TRY_CONFIG = 1 if defined $opts{'c'};
-
 
 use constant {
 	NEW => 0,
@@ -256,6 +255,7 @@ sub get_param {
 
 sub extract_assignmet {
 	my $str = shift;
+	my $stop = 0;
 	my @str = split /=/, $str;
 
 	#$str =~ s/^\([^\(\)]+\)//g;
@@ -266,12 +266,15 @@ sub extract_assignmet {
 		my @type_C = grep(/$1/, @type_C_funcs);
 		if (@type_C) {
 			trace "VULNERABILITY: Type C Vulnerability: may expose shared_info\n";
+			$stop = 1;
 		}
 		elsif ($str[$#str] =~ /alloc|get.*_page/) {
 			trace "SLUB: allocation $str[$#str]\n";
+			$stop = 1;
 		} elsif ($str[$#str] =~ /scsi_cmd_priv\s*\((.*)\)/) {
 			trace "VULNERABILITY: scsi_cmnd_priv: exposes scsi_cmnd: $str\n";
 			add_assignment_func 'scsi_cmnd_priv';
+			$stop = 1;
 			#TODO: Any point in tracing?
 		} else {
 			my $func = 'nan';
@@ -287,16 +290,17 @@ sub extract_assignmet {
 		if ($str =~ /skb.*\->data/) {
 			trace "RISK:[SKB] [$str]skb->data exposes sh_info\n";
 			#TODO: identify skb alloc funciions
-			return;
+			return (undef, 1);
 		}
 		unless (($str eq 'NULL') or ($str =~ /^\d$/)) {
 			trace "REPLACE: $str\n";
-			return $str;
+			return $str, 1;
 		} else {
 			trace "Trivial: $str\n";
+			$stop = 0;
 		}
 	}
-	return;
+	return (undef, $stop);
 }
 
 sub add_struct_to_global_cache {
@@ -320,7 +324,7 @@ sub get_struct_from_gloabl_cache {
 sub exists_in_global_cache {
 	my $type = shift;
 	lock %global_struct_cache;
-	return 1 if  exists $global_struct_cache{"$type"};
+	$local_stats{'global_struct_cache_exists'}++ and return 1 if  exists $global_struct_cache{"$type"};
 	return undef;
 }
 
@@ -329,16 +333,18 @@ sub get_struct_from_cache {
 	my $out;
 
 	$out = $local_struct_cache{"$type"};
-	return $out if defined $out;
+	$local_stats{'local_struct_cache'}++ and return $out if defined $out;
 
 	$out = get_struct_from_gloabl_cache  $type;
+	$local_stats{'global_struct_cache_hit'}++ if defined $out;
+	$local_stats{'global_struct_cache_miss'}++ unless defined $out;
 	return $out;
 }
 
 sub exists_in_cache {
 	my $type = shift;
 
-	return 1 if exists $local_struct_cache{"$type"};
+	$local_stats{'local_struct_cache_exists'}++ and return 1 if exists $local_struct_cache{"$type"};
 	return exists_in_global_cache $type;
 }
 
@@ -375,14 +381,13 @@ sub read_struct {
 	}
 	#typedef e.g, adapter_t
 	@out = qx(/usr/bin/pahole -EAa $name 2>/dev/null);
-	verbose "/usr/bin/pahole -EAa $name 2>/dev/null: [$type]";
+	verbose "/usr/bin/pahole -EAa $name 2>/dev/null: [$type]\n";
 	if (@out) {
 		my @out2 = grep(/$type/, @out);
 		for (@out2) {
 			chomp;
 			verbose "read_struct[P]: $_\n";
 		}
-		return undef;
 	}
 
 
@@ -448,6 +453,12 @@ sub get_cb_rec {
 	}
 	return $cb_count;
 
+}
+
+sub dump_local_stats {
+	foreach (sort {$a cmp $b} keys %local_stats) {
+		verbose "$_: $local_stats{$_}\n";
+	}
 }
 #################### FUNCTIONS ####################
 sub collect_cb {
@@ -748,6 +759,35 @@ sub cscope_recurse {
 	$CURR_DEPTH--;
 }
 
+sub handle_field {
+	my ($type, $field) = @_;
+	my $f_type = undef;
+	#if (defined $field) {
+	my $out = read_struct $type;
+
+	if (defined  $out) {
+		verbose "struct $type Found\n";
+		my @def = grep (/\W$field\W/, @{$out});
+		verbose "Field: ($#def)$def[0]";
+		if ($def[0] =~ /\W$field\[/) {
+			verbose "Field is not needed: $type\n";
+			$field = undef;
+		}
+		else {
+			$def[0] =~ /([\w\*\s]+)\s*$field/;
+			$f_type = $1 if defined $1;
+			verbose "Field is needed: $f_type|$def[0]";
+			#TODO : Extract field type:
+		}
+	}
+	else {
+		trace "ERR: Not Found $type\n";
+		my @type = qx(cscope -dL -1 $type);
+		return undef;
+	}
+	return $f_type;
+}
+
 ###
 # Returns :a
 #	1. Def line
@@ -782,8 +822,12 @@ sub get_biggest_mapped {
 		$line = next_line($file, $line);
 
 		#if ($$file[$line] =~ /^\s+struct\s+(\w+)\s+[\s\*\w\,]+,\s*$match\s*[;,]/) {
-		if ($$file[$line] =~ /\W$match\s*[,;]/) {
-			verbose "Possible match: $$file[$line]\n";
+		if ($$file[$line] =~ /,\s*\**\s*$match\s*[,;]/) {
+			my $type = 'NaN';
+			if ($$file[$line] =~ /^\s*([\w\s]+)[\s\*]+\w+\s*,/) {
+				$type = $1;
+			}
+			verbose "Possible match: $$file[$line]: $type\n";
 		}
 
 		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
@@ -801,32 +845,9 @@ sub get_biggest_mapped {
 			$fld = $field if defined $field;
 			verbose "$str|$type|$match|$fld\n";
 			trace "DECLARATION[$CURR_FUNC:$line]: $str\n";
-			if (defined $field) {
-				my $out = read_struct $type;
 
-				if (defined  $out) {
-					verbose "struct $type Found\n";
-					my @def = grep (/\W$field\W/, @{$out});
-					verbose "Field: ($#def)$def[0]";
-					if ($def[0] =~ /\W$field\[/) {
-						verbose "Field is not needed: $type\n";
-						$field = undef;
-					}
-					else {
-						$def[0] =~ /([\w\*\s]+)\s*$field/;
-						$f_type = $1 if defined $1;
-						verbose "Field is needed: $f_type|$def[0]";
-						#TODO : Extract field type:
-					}
-				}
-				else {
-					trace "ERR: Not Found $type\n";
-					my @type = qx(cscope -dL -1 $type);
-				#for (@type) {
-				#	verbose "cscope:$type:$_\n";
-				#}
-					return undef;
-				}
+			if (defined $field) {
+				$f_type = handle_field $type, $field;
 			}
 			verbose "return $str|$type|$match|$fld\n";
 			$f_type = $type unless defined $f_type;
@@ -889,6 +910,7 @@ sub handle_biggest_type {
 	my $rc;
 
 	$tmp =~ s/\*//;
+	$tmp =~ s/\s*static\s*//;
 	$tmp =~ s/\s*const\s*//;
 	$tmp =~ s/\s*unsigned\s*//;
 	$tmp =~ s/^\s*//;
@@ -971,7 +993,8 @@ sub assess_mapped {
 	my $stop_recurse = 0;
 	my $assignments = find_assignment $file, $line, $var, (defined $map_field) ? $map_field : $var_field;
 	foreach (@{$assignments}) {
-		my $rc = extract_assignmet $_;
+		my ($rc, $stop) = extract_assignmet $_;
+		verbose "$rc|$stop\n";
 		if (defined $rc) {
 			unless (exists ${$aliaces}{$rc}) {
 				${$aliaces}{$rc} = undef;
@@ -979,11 +1002,11 @@ sub assess_mapped {
 				inc_def_depth;
 				assess_mapped($file, $line -1, $rc, $map_field, $aliaces);
 				$CURR_DEF_DEPTH--;
-				$stop_recurse++;
 			} else {
 				trace "DBG: Endless Looop: $_ ($rc)\n" if defined $rc;
 			}
 		}
+		$stop_recurse |= $stop;
 	}
 	$fld = $map_field if defined $map_field;
 	verbose "[$CURR_FUNC]$def|$match|$var|$fld\n";
@@ -1086,6 +1109,7 @@ sub start_parsing {
 #		}
 		$file = get_next();
 	};
+	dump_local_stats;
 }
 #################### MAIN #########################3
 my $dir = dirname $0;
