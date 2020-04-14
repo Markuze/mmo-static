@@ -348,6 +348,28 @@ sub exists_in_cache {
 	return exists_in_global_cache $type;
 }
 
+sub read_struct_cscope {
+	my $type = shift;
+
+	my @out = qx(cscope -dL -1 $type);
+	verbose "cscope -dL -1 $type";
+
+	for (@out) {
+		chomp;
+		verbose "read_struct[C]: $_\n";
+	}
+	verbose "Cant cscope parse" and return undef if @out > 1;
+
+	my ($file, $tp, $line, @def) = split /\s+/, $out[0];
+	tie my @file_text, 'Tie::File', $file;
+
+	if ($file_text[$line -1] =~ /struct\s+$type\s*{/) {
+		verbose "Reading succeeded\n";
+	} else {
+		verbose "Reading failed [$file_text[$line -1]]\n";
+	}
+}
+
 sub read_struct {
 	my ($type, $name) = @_;
 	$name = $CURR_FILE unless defined $name;
@@ -373,13 +395,8 @@ sub read_struct {
 			return $out;
 		}
 	}
-	#cscope for not compiled
-	my @out3 = qx(cscope -dL -1 $type);
-	verbose "cscope -dL -1 $type";
-	for (@out3) {
-		chomp;
-		verbose "read_struct[C]: $_\n";
-	}
+	#cscope for not compiled or missing debug info
+	read_struct_cscope $type;
 	#typedef e.g, adapter_t
 	@out = qx(/usr/bin/pahole -EAa $name 2>/dev/null);
 	verbose "/usr/bin/pahole -EAa $name 2>/dev/null: [$type]\n";
@@ -746,7 +763,6 @@ sub cscope_recurse {
 	# 2. Follow func ptrs (e.g., netdev_ops)
 	unless ($#cscope > -1) {
 		warning "Found NO callers for $CURR_FUNC!!!\n";
-		trace "TEXT: Found NO callers for $CURR_FUNC!!!\n";
 		return;
 	}
 
@@ -822,7 +838,7 @@ sub handle_field {
 		for my $def (@def) {
 			if ($def =~ /\W$field\[/) {
 				verbose "Field is not needed: $type\n";
-				$field = undef;
+				#$field = undef;
 				warning "Please validte this\n"  if ($#def > 0);
 			}
 			elsif ($def =~ /([\w\*\s]+)\s*\*+\s*$field/) {
@@ -1081,7 +1097,8 @@ sub assess_mapped {
 			return;
 		} elsif (defined $map_field) {
 			trace "MISSING: assignment\n";
-		} else {
+		} elsif ($def =~ /\w\s+$var\W/) {
+			#not a pointer
 			trace "HEAP: mapped\n";
 		}
 	}
