@@ -358,7 +358,7 @@ sub read_struct_cscope {
 		chomp;
 		verbose "read_struct[C]: $_\n";
 	}
-	verbose "Reading: Cant cscope parse" and return undef unless @out == 1;
+	verbose "Reading: Cant cscope parse\n" and return undef unless @out == 1;
 
 	my ($file, $tp, $line, @def) = split /\s+/, $out[0];
 	tie my @file_text, 'Tie::File', $file;
@@ -369,6 +369,19 @@ sub read_struct_cscope {
 		verbose "Reading up succeeded\n";
 	} else {
 		verbose "Reading failed [$file_text[$line -1]]\n";
+	}
+}
+
+sub search_type_pahole {
+	my ($type, $name) = @_;
+	my @out = qx(/usr/bin/pahole -EAa $name 2>/dev/null);
+	verbose "/usr/bin/pahole -EAa $name 2>/dev/null: [$type]\n";
+	if (@out) {
+		my @out2 = grep(/$type/, @out);
+		for (@out2) {
+			chomp;
+			verbose "Reading Pahole: $_\n";
+		}
 	}
 }
 
@@ -397,19 +410,10 @@ sub read_struct {
 			return $out;
 		}
 	}
+	search_type_pahole $type, $name;
 	#cscope for not compiled or missing debug info
 	read_struct_cscope $type;
 	#typedef e.g, adapter_t
-	@out = qx(/usr/bin/pahole -EAa $name 2>/dev/null);
-	verbose "/usr/bin/pahole -EAa $name 2>/dev/null: [$type]\n";
-	if (@out) {
-		my @out2 = grep(/$type/, @out);
-		for (@out2) {
-			chomp;
-			verbose "read_struct[P]: $_\n";
-		}
-	}
-
 
 	add_to_struct_cache($type, undef);
 	#TODO: Read from cscope if not found
@@ -894,12 +898,12 @@ sub get_biggest_mapped {
 		$line = next_line($file, $line);
 
 		#if ($$file[$line] =~ /^\s+struct\s+(\w+)\s+[\s\*\w\,]+,\s*$match\s*[;,]/) {
-		if ($$file[$line] =~ /,\s*\**\s*$match\s*[,;]/) {
+		if ($$file[$line] =~ /^[,\s\w\*]+,\s*\**\s*$match\s*[,;]/) {
 			my $type = 'NaN';
 			if ($$file[$line] =~ /^\s*([\w\s]+)[\s\*]+\w+\s*,/) {
 				$type = $1;
 			}
-			verbose "Possible match: $$file[$line]: $type\n";
+			verbose "Possible match: $$file[$line]:$match:$type\n";
 		}
 
 		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
