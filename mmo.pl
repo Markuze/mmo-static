@@ -459,6 +459,9 @@ sub get_cb_rec {
 sub dump_local_stats {
 	my ($i, $u);
 
+	$i = 0;
+	$u = 0;
+
 	foreach (sort {$a cmp $b} keys %local_stats) {
 		verbose "$_: $local_stats{$_}\n";
 	}
@@ -779,16 +782,32 @@ sub handle_field {
 	if (defined  $out) {
 		verbose "struct $type Found\n";
 		my @def = grep (/\W$field\W/, @{$out});
-		verbose "Field: ($#def)$def[0]";
-		if ($def[0] =~ /\W$field\[/) {
-			verbose "Field is not needed: $type\n";
-			$field = undef;
+		my $idx = 0;
+
+		unless ($#def == 0) {
+			for (@def) {
+				chomp;
+				verbose "OPT: $_\n";
+			}
+			for (@{$out}) {
+				verbose "$_";
+			}
+			trace "Please debug $type - $field\n";
 		}
-		else {
-			$def[0] =~ /([\w\*\s]+)\s*\*+\s*$field/;
-			$f_type = $1 if defined $1;
-			verbose "Field is needed: $f_type|$def[0]";
-			#TODO : Extract field type:
+		verbose "Field: ($#def)$def[$idx]";
+		for my $def (@def) {
+			if ($def =~ /\W$field\[/) {
+				verbose "Field is not needed: $type\n";
+				$field = undef;
+				warning "Please validte this\n"  if ($#def > 0);
+			}
+			elsif ($def =~ /([\w\*\s]+)\s*\*+\s*$field/) {
+				$f_type = $1 if defined $1;
+				verbose "Field is needed: $f_type|$def";
+				#TODO : Extract field type:
+			} else {
+				verbose "DBG: $type: $field:$def\n";
+			}
 		}
 	}
 	else {
@@ -983,7 +1002,7 @@ sub assess_mapped {
 
 	warning "Unhandled Case\n" and return unless defined $def;
 	unless (defined $map_field) {
-		treace "Biggest mapped type: $f_type\n";
+		trace "Biggest mapped type: $f_type\n";
 		if ($type eq 'sk_buff') {
 			trace "SKB: exposes shared_info\n";
 			#TODO: Also search for  build skb
