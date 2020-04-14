@@ -858,10 +858,9 @@ sub handle_field {
 	}
 	else {
 		trace "ERR: Not Found $type\n";
-		my @type = qx(cscope -dL -1 $type);
 		return undef;
 	}
-	return $f_type;
+	return 1, $f_type;
 }
 
 ###
@@ -924,7 +923,9 @@ sub get_biggest_mapped {
 			trace "DECLARATION[$CURR_FUNC:$line]: $str\n";
 
 			if (defined $field) {
-				$f_type = handle_field $type, $field;
+				my $ok;
+				($ok, $f_type) = handle_field $type, $field;
+				return undef unless defined $ok;
 			}
 			$f_type = $type unless defined $f_type;
 			trace "Biggest: $str|$type|$match|$fld|$f_type\n";
