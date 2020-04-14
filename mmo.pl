@@ -897,12 +897,29 @@ sub get_biggest_mapped {
 		$line = next_line($file, $line);
 
 		#if ($$file[$line] =~ /^\s+struct\s+(\w+)\s+[\s\*\w\,]+,\s*$match\s*[;,]/) {
-		if ($$file[$line] =~ /^[,\s\w\*]+,\s*\**\s*$match\s*[,;]/) {
+		if ($$file[$line] =~ /^[,\s\w\*]+,\s*\**\s*$match\W.*;/) {
+			verbose "Possible match: $$file[$line]:$match:\n";
+
+			$line-- and next if ($$file[$line] =~ /\)\s*;/);
 			my $type = 'NaN';
 			if ($$file[$line] =~ /^\s*([\w\s]+)[\s\*]+\w+\s*,/) {
-				$type = $1;
+				$type = $1 if defined $1;
+				$type =~ /\W(\w+)$/;
+				$type = $1 if defined $1;
 			}
-			verbose "Possible match: $$file[$line]:$match:$type\n";
+			my $str = linearize $file, $line;
+			my $fld = 'NaN';
+			trace "Possible match: $$file[$line]:$match:$type\n";
+
+			if (defined $field) {
+				my $ok;
+				($ok, $f_type) = handle_field $type, $field;
+				return undef unless defined $ok;
+				$fld = $field;
+			}
+			$f_type = $type unless defined $f_type;
+			trace "Biggest: $str|$type|$match|$fld|$f_type\n";
+			return undef;
 		}
 
 		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
