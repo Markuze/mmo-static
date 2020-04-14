@@ -51,7 +51,7 @@ my %struct_cache = ();
 my %local_struct_cache = ();
 my %local_stats = ();
 ####################### INIT #####################
-my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32);
+my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32 assoc_array_ptr);
 my %opts = ();
 my $argv = "@ARGV";
 getopts('vk:c', \%opts);
@@ -352,19 +352,21 @@ sub read_struct_cscope {
 	my $type = shift;
 
 	my @out = qx(cscope -dL -1 $type);
-	verbose "cscope -dL -1 $type";
+	verbose "cscope -dL -1 $type\n";
 
 	for (@out) {
 		chomp;
 		verbose "read_struct[C]: $_\n";
 	}
-	verbose "Cant cscope parse" and return undef if @out > 1;
+	verbose "Reading: Cant cscope parse" and return undef unless @out == 1;
 
 	my ($file, $tp, $line, @def) = split /\s+/, $out[0];
 	tie my @file_text, 'Tie::File', $file;
 
 	if ($file_text[$line -1] =~ /struct\s+$type\s*{/) {
-		verbose "Reading succeeded\n";
+		verbose "Reading down succeeded\n";
+	} elsif ($file_text[$line -1] =~ /}\s*$type\s*;/){
+		verbose "Reading up succeeded\n";
 	} else {
 		verbose "Reading failed [$file_text[$line -1]]\n";
 	}
@@ -906,6 +908,7 @@ sub get_biggest_mapped {
 			my $fld = 'NaN';
 			#sometimes happens with global vars
 			$line-- and next if ($type eq 'return');
+			$line-- and next if ($$file[$line] =~ /(\w+)[\s\*]+$match\-/);
 
 			if ($type eq 'struct') {
 				verbose "HEURISTIC: ($match) $$file[$line]: \n";
@@ -980,10 +983,10 @@ sub handle_biggest_type {
 	my $rc;
 
 	$tmp =~ s/\*//;
-	$tmp =~ s/\s*struct\s*//;
-	$tmp =~ s/\s*static\s*//;
-	$tmp =~ s/\s*const\s*//;
-	$tmp =~ s/\s*unsigned\s*//;
+	$tmp =~ s/\Wstruct\W//;
+	$tmp =~ s/\Wstatic\W//;
+	$tmp =~ s/\Wconst\W//;
+	$tmp =~ s/\Wunsigned\W//;
 	$tmp =~ s/^\s*//;
 	$tmp =~ s/\s*$//;
 
