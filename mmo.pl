@@ -29,7 +29,7 @@ my $TRY_CONFIG = undef;
 my $FH;
 my $TID;
 
-my @type_C_funcs = qw(page_frag_alloc); #TODO: recurse and collect callers untill all are exported.
+my @type_C_funcs = qw(page_frag_alloc netdev_alloc napi_alloc); #TODO: recurse and collect callers untill all are exported.
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my %exported_symbols : shared = ();
@@ -395,6 +395,30 @@ sub read_struct {
 	add_to_struct_cache($type, undef);
 	#TODO: Read from cscope if not found
 	return undef;
+}
+
+sub prep_build_skb {
+	my @callers = qx(cscope -dL -3 build_skb);
+	my $i = 0;
+
+	print ITALIC, CYAN, "build_skb callers\n", RESET;
+
+	foreach (@callers) {
+		$i++;
+		print CYAN, "VULNERABILITY: $i) $_", RESET;
+	}
+}
+
+sub prep_type_c {
+	my $func = shift;
+
+	$func = 'page_frag_alloc' unless defined $func;
+	my @callers = qx(cscope -dL -3 $func);
+
+	print ITALIC, CYAN, "Callers\n", RESET;
+	foreach (@callers) {
+		print CYAN, "$_", RESET;
+	}
 }
 
 sub next_line {
@@ -1176,6 +1200,8 @@ if (defined $TRY_CONFIG) {
 print ITALIC, CYAN, "Found $#cscope_lines files\n", RESET;
 my $nproc = `nproc`;
 qx(mkdir -p $LOGS_DIR);
+
+prep_build_skb;
 
 my @threads;
 
