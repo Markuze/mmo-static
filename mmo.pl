@@ -51,7 +51,7 @@ my %struct_cache = ();
 my %local_struct_cache = ();
 my %local_stats = ();
 ####################### INIT #####################
-my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 uint8_t uint16_t __le16);
+my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32);
 my %opts = ();
 my $argv = "@ARGV";
 getopts('vk:c', \%opts);
@@ -785,7 +785,7 @@ sub handle_field {
 			$field = undef;
 		}
 		else {
-			$def[0] =~ /([\w\*\s]+)\s*$field/;
+			$def[0] =~ /([\w\*\s]+)\s*\*+\s*$field/;
 			$f_type = $1 if defined $1;
 			verbose "Field is needed: $f_type|$def[0]";
 			#TODO : Extract field type:
@@ -860,9 +860,9 @@ sub get_biggest_mapped {
 			if (defined $field) {
 				$f_type = handle_field $type, $field;
 			}
-			verbose "return $str|$type|$match|$fld\n";
 			$f_type = $type unless defined $f_type;
-			return $str, $type, $match, $field,$f_type;
+			trace "Biggest: $str|$type|$match|$fld|$f_type\n";
+			return $str, $type, $match, $field, $f_type;
 		}
 		$line--;
 	}
@@ -921,6 +921,7 @@ sub handle_biggest_type {
 	my $rc;
 
 	$tmp =~ s/\*//;
+	$tmp =~ s/\s*struct\s*//;
 	$tmp =~ s/\s*static\s*//;
 	$tmp =~ s/\s*const\s*//;
 	$tmp =~ s/\s*unsigned\s*//;
@@ -933,7 +934,7 @@ sub handle_biggest_type {
 	if ($#base > -1) {
 		verbose "Base Type: $type\n";
 	} else {
-		$rc =  get_cb_rec '', undef, $type;
+		$rc =  get_cb_rec '', undef, $tmp;
 	}
 	return $rc;
 }
@@ -982,6 +983,7 @@ sub assess_mapped {
 
 	warning "Unhandled Case\n" and return unless defined $def;
 	unless (defined $map_field) {
+		treace "Biggest mapped type: $f_type\n";
 		if ($type eq 'sk_buff') {
 			trace "SKB: exposes shared_info\n";
 			#TODO: Also search for  build skb
@@ -1021,7 +1023,7 @@ sub assess_mapped {
 		$stop_recurse += $stop;
 	}
 	$fld = $map_field if defined $map_field;
-	verbose "[$CURR_FUNC]$def|$match|$var|$fld\n";
+	trace "[$CURR_FUNC]$def|$match|$var|$fld\n";
 	#Need a XOR relstionship
 	unless ($stop_recurse > 0) {
 		if ($def =~ /$CURR_FUNC\s*\(/) {
