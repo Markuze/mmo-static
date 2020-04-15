@@ -424,6 +424,7 @@ sub read_up {
 	}
 	#verbose "$$file[$line]\n";
 	push @struct, $$file[$line];
+	verbose "$DBG_CACHE:read_up: $#struct\n";
 	return \@struct;
 }
 
@@ -466,16 +467,23 @@ sub read_struct_cscope {
 
 sub search_type_pahole {
 	my ($type, $name) = @_;
+	my $arr = undef;
+
+	return undef unless -e $name;
+
 	my @out = qx(/usr/bin/pahole -EAa $name 2>/dev/null);
 	verbose "/usr/bin/pahole -EAa $name 2>/dev/null: [$type]\n";
 	if (@out) {
 		my $line = 0;
 		for (@out) {
-			return read_up(\@out, $line) if /^}\s*$type\s*;/;
+			verbose "$DBG_CACHE:[$type]$_\n" if /\W$type\W/;
+			$arr = read_up(\@out, $line) and last if /^}\s*[\w\(\)]*\s*$type\s*;/;
 			$line++;
-			verbose "$_\n" if /\W$type\W/;
 		}
 	}
+	return undef unless $#{$arr} > 0;
+	verbose "$DBG_CACHE:PAHOLE: $#{$arr}\n";
+	return $arr;
 }
 
 sub read_struct {
@@ -506,9 +514,10 @@ sub read_struct {
 			return $out;
 		}
 	}
-#$out = search_type_pahole $type, $name;
-#verbose "$out\n" if defined $out;
-#add_to_struct_cache($type, $out) and return $out if defined $out;
+	$out = search_type_pahole $type, $name;
+	verbose "$DBG_CACHE:PAHOLE:$out\n" if defined $out;
+	return $out;
+	add_to_struct_cache($type, $out) and return $out if defined $out;
 ##cscope for not compiled or missing debug info
 #$out = read_struct_cscope $type;
 ##typedef e.g, adapter_t
@@ -1009,13 +1018,13 @@ sub get_biggest_mapped {
 
 		#if ($$file[$line] =~ /^\s+struct\s+(\w+)\s+[\s\*\w\,]+,\s*$match\s*[;,]/) {
 		if ($$file[$line] =~ /^[,\s\w\*]+,\s*\**\s*$match\W.*;/) {
-			verbose "Possible match: $$file[$line]:$match:\n";
+			verbose "Possible match: $$file[$line]:$match\n";
 
 			$line-- and next if ($$file[$line] =~ /\)\s*;/);
 			my $type = 'NaN';
 			if ($$file[$line] =~ /^\s*([\w\s]+)[\s\*]+\w+\s*,/) {
 				$type = $1 if defined $1;
-				$type =~ /\W(\w+)$/;
+				$type =~ /\W(\w+)\s*$/;
 				$type = $1 if defined $1;
 			}
 			my $str = linearize $file, $line;
