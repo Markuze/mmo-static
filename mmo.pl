@@ -61,7 +61,7 @@ my $argv = "@ARGV";
 getopts('vk:cx', \%opts);
 
 $KERNEL_DIR = $opts{'k'} if defined $opts{'k'};
-$VMLINUX = "$KERNEL_DIR/vmlinux";
+$VMLINUX = "$KERNEL_DIR/vmlinux" if defined $opts{'x'};
 
 $verbose = 1 if defined $opts{'v'};
 $TRY_CONFIG = 1 if defined $opts{'c'};
