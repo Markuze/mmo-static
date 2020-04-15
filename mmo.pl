@@ -21,6 +21,7 @@ my $RECURSION_DEPTH_LIMIT = 6; #was once 6
 my $RECURSION_DEF_DEPTH_LIMIT = 6;
 my $MAX_STACK_SIZE = 512;
 my $LOGS_DIR = '/tmp/logs';
+my $STRUCT_CACHE = '/home/xlr8vgn/struct_cache';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
 my $VMLINUX = '/home/xlr8vgn/ubuntu-bionic/vmlinux';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
@@ -50,6 +51,7 @@ my %struct_log = ();
 my %struct_cache = ();
 my %local_struct_cache = ();
 my %local_stats = ();
+my %cached_struct_cb_count = ();
 ####################### INIT #####################
 my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32 assoc_array_ptr);
 my %opts = ();
@@ -147,6 +149,16 @@ sub inc_depth {
 		lock $CURR_DEPTH_MAX;
 		$CURR_DEPTH_MAX  = $CURR_DEPTH
 	}
+}
+
+sub add_cached_struct_cb_count {
+	my ($type, $cnt) = @_;
+	$cached_struct_cb_count{$type} = $cnt;
+}
+
+sub get_cached_struct_cb_count {
+	my $type = shift;
+	return $cached_struct_cb_count{$type};
 }
 
 sub check_exported {
@@ -303,6 +315,28 @@ sub extract_assignmet {
 	return (undef, $stop);
 }
 
+sub get_struct_from_perma_cache {
+	my $type = shift;
+	my $file = "$STRUCT_CACHE/$type.txt";
+
+	return unless -e $file;
+
+	tie my @text, 'Tie::File', $file;
+	return \@text;
+}
+
+sub add_struct_to_perma_cache {
+	my ($type, $arr) = @_;
+
+	return unless defined $STRUCT_CACHE;
+
+	open my $fh, '>', "$STRUCT_CACHE/$type.txt";
+	foreach (@{$arr}) {
+		print $fh, "$_\n";
+	}
+	close $fh;
+}
+
 sub add_struct_to_global_cache {
 	my ($type, $arr) = @_;
 	lock %global_struct_cache;
@@ -313,6 +347,7 @@ sub add_to_struct_cache {
 	my ($type, $arr) = @_;
 	$local_struct_cache{"$type"} = $arr;
 	add_struct_to_global_cache $type, $arr;
+	add_struct_to_perma_cache $type, $arr;
 }
 
 sub get_struct_from_gloabl_cache {
@@ -435,6 +470,9 @@ sub read_struct {
 	my $out = get_struct_from_cache $type;
 	return $out if defined $out;
 
+	$out = get_struct_from_perma_cache $type;
+	return $out if defined $out;
+
 	$name =~ s/\.c/\.o/;
 	warning "File not Found $name\n" unless -e $name;
 
@@ -515,11 +553,16 @@ sub next_line {
 sub get_cb_rec {
 	my ($prfx, $struct_log, $type, $file_hint) = @_;
 	my %struct_log;
-	my $cb_count = 0;
+	my $cb_count;
 	my $struct;
 
 	$struct_log = \%struct_log unless defined $struct_log;
 	${$struct_log}{$type} = undef;
+
+	$cb_count = get_cached_struct_cb_count $type;
+	return $cb_count if defined $cb_count;
+
+	$cb_count = 0;
 
 	$struct = read_struct $type, $file_hint;
 	warning "Cant process $type for callbacks\n"  and return 0 unless defined $struct;
@@ -550,6 +593,7 @@ sub get_cb_rec {
 	        $cb_count += get_cb_rec("${prfx}$type->", $struct_log, $1, $file_hint);
 	}
 	#TODO: Cache results
+	add_cached_struct_cb_count $type, $cb_count;
 	return $cb_count;
 }
 
@@ -1293,6 +1337,7 @@ if (defined $TRY_CONFIG) {
 print ITALIC, CYAN, "Found $#cscope_lines files\n", RESET;
 my $nproc = `nproc`;
 qx(mkdir -p $LOGS_DIR);
+qx(mkdir -p $STRUCT_CACHE);
 
 prep_build_skb;
 
