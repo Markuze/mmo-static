@@ -52,6 +52,8 @@ my %struct_cache = ();
 my %local_struct_cache = ();
 my %local_stats = ();
 my %cached_struct_cb_count = ();
+
+my $DBG_CACHE = "DBG_CACHE::";
 ####################### INIT #####################
 my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32 assoc_array_ptr);
 my %opts = ();
@@ -322,19 +324,24 @@ sub get_struct_from_perma_cache {
 	return unless -e $file;
 
 	tie my @text, 'Tie::File', $file;
+	verbose "PERMA: read $#{text} lines from $file\n";
 	return \@text;
 }
 
 sub add_struct_to_perma_cache {
 	my ($type, $arr) = @_;
+	my $file = "$STRUCT_CACHE/$type.txt";
 
+	return unless defined $arr;
 	return unless defined $STRUCT_CACHE;
+	return if -e $file;
 
-	open my $fh, '>', "$STRUCT_CACHE/$type.txt";
+	open my $fh, '>', $file;
 	foreach (@{$arr}) {
 		print $fh, "$_\n";
 	}
 	close $fh;
+	verbose "${DBG_CACHE}PERMA: Written $#{arr} lines to $file\n";
 }
 
 sub add_struct_to_global_cache {
@@ -345,6 +352,8 @@ sub add_struct_to_global_cache {
 
 sub add_to_struct_cache {
 	my ($type, $arr) = @_;
+	verbose "${DBG_CACHE}CACHE: Written $#{arr} lines to cache\n" if defined $arr;
+}
 	$local_struct_cache{"$type"} = $arr;
 	add_struct_to_global_cache $type, $arr;
 	add_struct_to_perma_cache $type, $arr;
@@ -353,7 +362,9 @@ sub add_to_struct_cache {
 sub get_struct_from_gloabl_cache {
 	my $type = shift;
 	lock %global_struct_cache;
-	return $global_struct_cache{"$type"};
+	my $arr = $global_struct_cache{"$type"};
+	verbose "${DBG_CACHE}GLOBAL: read $#arr lines from global cache\n" if defined $out;
+	return $arr;
 }
 
 sub exists_in_global_cache {
@@ -368,6 +379,7 @@ sub get_struct_from_cache {
 	my $out;
 
 	$out = $local_struct_cache{"$type"};
+	verbose "${DBG_CACHE}LOCAL: read $#arr lines from global cache\n" if defined $out;
 	$local_stats{'local_struct_cache'}++ and return $out if defined $out;
 
 	$out = get_struct_from_gloabl_cache  $type;
@@ -388,12 +400,13 @@ sub read_down {
 	my @struct : shared = ();
 
 	until ($$file[$line] =~ /^}/) {
-		verbose "$$file[$line]\n";
+		#verbose "$$file[$line]\n";
 		push @struct, $$file[$line];
 		$line++;
 		last if $line == $#{$file};
 	}
-	verbose "$$file[$line]\n";
+	#verbose "$$file[$line]\n";
+	push @struct, $$file[$line];
 	return \@struct;
 }
 
@@ -402,12 +415,13 @@ sub read_up {
 	my @struct : shared = ();
 
 	until ($$file[$line] =~ /^\w/) {
-		verbose "$$file[$line]";
+		#verbose "$$file[$line]";
 		push @struct, $$file[$line];
 		$line--;
 		last if $line == 0;
 	}
-	verbose "$$file[$line]\n";
+	#verbose "$$file[$line]\n";
+	push @struct, $$file[$line];
 	return \@struct;
 }
 
@@ -442,7 +456,7 @@ sub read_struct_cscope {
 
 	} elsif ($file_text[$line -1] =~ /^}\s*$type\s*;/){
 		verbose "Reading up succeeded\n";
-		read_up \@file_text, $line -1;
+		return read_up \@file_text, $line -1;
 	} else {
 		verbose "Reading failed [$file_text[$line -1]]\n";
 	}
@@ -481,7 +495,6 @@ sub read_struct {
 		return undef;
 	}
 
-	verbose "extracting $type\n";
 	for ("$name", "$VMLINUX") {
 		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
 		if (@out) {
@@ -499,7 +512,7 @@ sub read_struct {
 
 	add_to_struct_cache($type, $out);
 	#TODO: Read from cscope if not found
-	return $out;;
+	return $out;
 }
 
 sub prep_build_skb {
