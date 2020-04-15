@@ -23,7 +23,7 @@ my $MAX_STACK_SIZE = 512;
 my $LOGS_DIR = '/tmp/logs';
 my $STRUCT_CACHE = '/home/xlr8vgn/struct_cache';
 my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
-my $VMLINUX = '/home/xlr8vgn/ubuntu-bionic/vmlinux';
+my $VMLINUX;# = '/home/xlr8vgn/ubuntu-bionic/vmlinux';
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
 my $TRY_CONFIG = undef;
@@ -58,7 +58,7 @@ my $DBG_CACHE = "DBG_CACHE::";
 my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32 assoc_array_ptr);
 my %opts = ();
 my $argv = "@ARGV";
-getopts('vk:c', \%opts);
+getopts('vk:cx', \%opts);
 
 $KERNEL_DIR = $opts{'k'} if defined $opts{'k'};
 $VMLINUX = "$KERNEL_DIR/vmlinux";
@@ -324,6 +324,7 @@ sub get_struct_from_perma_cache {
 	return unless -e $file;
 
 	tie my @text, 'Tie::File', $file;
+	return undef if @text == 0;
 	verbose "PERMA: read $#{text} lines from $file\n";
 	return \@text;
 }
@@ -338,10 +339,10 @@ sub add_struct_to_perma_cache {
 
 	open my $fh, '>', $file;
 	foreach (@{$arr}) {
-		print $fh, "$_\n";
+		print $fh "$_\n";
 	}
 	close $fh;
-	verbose "${DBG_CACHE}PERMA: Written $#{arr} lines to $file\n";
+	verbose "${DBG_CACHE}PERMA: Written $#{$arr} lines to $file\n";
 }
 
 sub add_struct_to_global_cache {
@@ -352,8 +353,8 @@ sub add_struct_to_global_cache {
 
 sub add_to_struct_cache {
 	my ($type, $arr) = @_;
-	verbose "${DBG_CACHE}CACHE: Written $#{arr} lines to cache\n" if defined $arr;
-}
+	verbose "${DBG_CACHE}CACHE: Written $#{$arr} lines to cache\n" if defined $arr;
+
 	$local_struct_cache{"$type"} = $arr;
 	add_struct_to_global_cache $type, $arr;
 	add_struct_to_perma_cache $type, $arr;
@@ -363,7 +364,8 @@ sub get_struct_from_gloabl_cache {
 	my $type = shift;
 	lock %global_struct_cache;
 	my $arr = $global_struct_cache{"$type"};
-	verbose "${DBG_CACHE}GLOBAL: read $#arr lines from global cache\n" if defined $out;
+
+	verbose "${DBG_CACHE}GLOBAL: read $#{$arr} lines from global cache\n" if defined $arr;
 	return $arr;
 }
 
@@ -379,7 +381,7 @@ sub get_struct_from_cache {
 	my $out;
 
 	$out = $local_struct_cache{"$type"};
-	verbose "${DBG_CACHE}LOCAL: read $#arr lines from global cache\n" if defined $out;
+	verbose "${DBG_CACHE}LOCAL: read $#{$out} lines from global cache\n" if defined $out;
 	$local_stats{'local_struct_cache'}++ and return $out if defined $out;
 
 	$out = get_struct_from_gloabl_cache  $type;
@@ -495,7 +497,8 @@ sub read_struct {
 		return undef;
 	}
 
-	for ("$name", "$VMLINUX") {
+	for ("$name", $VMLINUX) {
+		next unless defined $_;
 		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
 		if (@out) {
 			$out = \@out;
