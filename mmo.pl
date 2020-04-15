@@ -452,12 +452,12 @@ sub read_struct {
 			return $out;
 		}
 	}
-	$out = search_type_pahole $type, $name;
-	verbose "$out\n" if defined $out;
-	add_to_struct_cache($type, $out) and return $out if defined $out;
-	#cscope for not compiled or missing debug info
-	$out = read_struct_cscope $type;
-	#typedef e.g, adapter_t
+#$out = search_type_pahole $type, $name;
+#verbose "$out\n" if defined $out;
+#add_to_struct_cache($type, $out) and return $out if defined $out;
+##cscope for not compiled or missing debug info
+#$out = read_struct_cscope $type;
+##typedef e.g, adapter_t
 
 	add_to_struct_cache($type, $out);
 	#TODO: Read from cscope if not found
