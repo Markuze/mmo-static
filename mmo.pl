@@ -442,26 +442,26 @@ sub read_struct_cscope {
 		if (($_ =~ /struct\s+$type\s*{/) or ($_ =~ /^}\s*$type\s*;/)){
 			$idx = $i;
 			$cnt++;
-			verbose "read_struct[C:Match$idx]: $_\n";
+			verbose "CSCOPE[C:Match$idx]: $_\n";
 		} else {
-			verbose "read_struct[C]: $_\n";
+			verbose "CSCOPE[C]: $_\n";
 		}
 		$i++;
 	}
-	verbose "Reading: Cant cscope parse[$i:$idx:$cnt]\n" and return undef unless $cnt == 1;
+	verbose "CSCOPE: Cant cscope parse[$i:$idx:$cnt]\n" and return undef unless $cnt == 1;
 
 	my ($file, $tp, $line, @def) = split /\s+/, $out[$idx];
 	tie my @file_text, 'Tie::File', $file;
 
 	if ($file_text[$line -1] =~ /struct\s+$type\s*{/) {
-		verbose "Reading down succeeded\n";
+		verbose "CSCOPE down succeeded\n";
 		return read_down \@file_text, $line -1;
 
 	} elsif ($file_text[$line -1] =~ /^}\s*$type\s*;/){
-		verbose "Reading up succeeded\n";
+		verbose "CSCOPE up succeeded\n";
 		return read_up \@file_text, $line -1;
 	} else {
-		verbose "Reading failed [$file_text[$line -1]]\n";
+		verbose "CSCOPE failed [$file_text[$line -1]]\n";
 	}
 }
 
@@ -516,11 +516,11 @@ sub read_struct {
 	}
 	$out = search_type_pahole $type, $name;
 	verbose "$DBG_CACHE:PAHOLE:$out\n" if defined $out;
-	return $out;
 	add_to_struct_cache($type, $out) and return $out if defined $out;
-##cscope for not compiled or missing debug info
-#$out = read_struct_cscope $type;
-##typedef e.g, adapter_t
+
+	##cscope for not compiled or missing debug info
+	$out = read_struct_cscope $type;
+	verbose "$DBG_CACHE:CSCOPE:$out\n" if defined $out;
 
 	add_to_struct_cache($type, $out);
 	#TODO: Read from cscope if not found
