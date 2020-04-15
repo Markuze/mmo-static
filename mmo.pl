@@ -390,7 +390,7 @@ sub read_struct_cscope {
 		if (($_ =~ /struct\s+$type\s*{/) or ($_ =~ /^}\s*$type\s*;/)){
 			$idx = $i;
 			$cnt++;
-			verbose "read_struct[C:Match]: $_\n";
+			verbose "read_struct[C:Match$idx]: $_\n";
 		} else {
 			verbose "read_struct[C]: $_\n";
 		}
@@ -398,7 +398,7 @@ sub read_struct_cscope {
 	}
 	verbose "Reading: Cant cscope parse[$i:$idx:$cnt]\n" and return undef unless $cnt == 1;
 
-	my ($file, $tp, $line, @def) = split /\s+/, $out[0];
+	my ($file, $tp, $line, @def) = split /\s+/, $out[$idx];
 	tie my @file_text, 'Tie::File', $file;
 
 	if ($file_text[$line -1] =~ /struct\s+$type\s*{/) {
@@ -453,6 +453,7 @@ sub read_struct {
 		}
 	}
 	$out = search_type_pahole $type, $name;
+	verbose "$out\n" if defined $out;
 	add_to_struct_cache($type, $out) and return $out if defined $out;
 	#cscope for not compiled or missing debug info
 	$out = read_struct_cscope $type;
@@ -887,7 +888,8 @@ sub handle_field {
 			for (@{$out}) {
 				verbose "$_";
 			}
-			trace "Please debug $type - $field\n";
+			trace "Please debug $type - $field [$#def]\n";
+			return undef if $#def == -1;
 		}
 		verbose "Field: ($#def)$def[$idx]";
 		for my $def (@def) {
