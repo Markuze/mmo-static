@@ -348,25 +348,66 @@ sub exists_in_cache {
 	return exists_in_global_cache $type;
 }
 
+sub read_down {
+	my ($file, $line) = @_;
+	my @struct : shared = ();
+
+	until ($$file[$line] =~ /^}/) {
+		verbose "$$file[$line]\n";
+		push @struct, $$file[$line];
+		$line++;
+		last if $line == $#{$file};
+	}
+	verbose "$$file[$line]\n";
+	return \@struct;
+}
+
+sub read_up {
+	my ($file, $line) = @_;
+	my @struct : shared = ();
+
+	until ($$file[$line] =~ /^\w/) {
+		verbose "$$file[$line]";
+		push @struct, $$file[$line];
+		$line--;
+		last if $line == 0;
+	}
+	verbose "$$file[$line]\n";
+	return \@struct;
+}
+
 sub read_struct_cscope {
 	my $type = shift;
+	my $idx = 0;
+	my $cnt = 0;
+	my $i = 0;
 
 	my @out = qx(cscope -dL -1 $type);
 	verbose "cscope -dL -1 $type\n";
 
 	for (@out) {
 		chomp;
-		verbose "read_struct[C]: $_\n";
+		if (($_ =~ /struct\s+$type\s*{/) or ($_ =~ /^}\s*$type\s*;/)){
+			$idx = $i;
+			$cnt++;
+			verbose "read_struct[C:Match]: $_\n";
+		} else {
+			verbose "read_struct[C]: $_\n";
+		}
+		$i++;
 	}
-	verbose "Reading: Cant cscope parse\n" and return undef unless @out == 1;
+	verbose "Reading: Cant cscope parse[$i:$idx:$cnt]\n" and return undef unless $cnt == 1;
 
 	my ($file, $tp, $line, @def) = split /\s+/, $out[0];
 	tie my @file_text, 'Tie::File', $file;
 
 	if ($file_text[$line -1] =~ /struct\s+$type\s*{/) {
 		verbose "Reading down succeeded\n";
-	} elsif ($file_text[$line -1] =~ /}\s*$type\s*;/){
+		return read_down \@file_text, $line -1;
+
+	} elsif ($file_text[$line -1] =~ /^}\s*$type\s*;/){
 		verbose "Reading up succeeded\n";
+		read_up \@file_text, $line -1;
 	} else {
 		verbose "Reading failed [$file_text[$line -1]]\n";
 	}
@@ -377,10 +418,11 @@ sub search_type_pahole {
 	my @out = qx(/usr/bin/pahole -EAa $name 2>/dev/null);
 	verbose "/usr/bin/pahole -EAa $name 2>/dev/null: [$type]\n";
 	if (@out) {
-		my @out2 = grep(/$type/, @out);
-		for (@out2) {
-			chomp;
-			verbose "Reading Pahole: $_\n";
+		my $line = 0;
+		for (@out) {
+			return read_up(\@out, $line) if /^}\s*$type\s*;/;
+			$line++;
+			verbose "$_\n" if /\W$type\W/;
 		}
 	}
 }
@@ -410,14 +452,15 @@ sub read_struct {
 			return $out;
 		}
 	}
-	search_type_pahole $type, $name;
+	$out = search_type_pahole $type, $name;
+	add_to_struct_cache($type, $out) and return $out if defined $out;
 	#cscope for not compiled or missing debug info
-	read_struct_cscope $type;
+	$out = read_struct_cscope $type;
 	#typedef e.g, adapter_t
 
-	add_to_struct_cache($type, undef);
+	add_to_struct_cache($type, $out);
 	#TODO: Read from cscope if not found
-	return undef;
+	return $out;;
 }
 
 sub prep_build_skb {
@@ -489,18 +532,24 @@ sub get_cb_rec {
 		$cb_count += $num;
 	}
 
-	my @st = grep(/^\s*struct\s+(\w+)\s+\*+/, @{$struct});
-	#\s*\*+\s*(\w+)
+	my @st = grep(/^\s*struct\s+(\w+)\s+\w+.*;/, @{$struct});
+	foreach (@st) {
+	        /^\s*struct\s+(\w+)\s+\w+.*;/;
+	        next if exists ${$struct_log}{$1};
+	        ${$struct_log}{$1} = undef;
+		verbose "get_cb_rec:$_:$1\n";
+	        $cb_count += get_cb_rec("${prfx}$type.", $struct_log, $1, $file_hint);
+	}
+
+	@st = grep(/^\s*struct\s+(\w+)\s+\*+/, @{$struct});
 	foreach (@st) {
 	        /^\s*struct\s+(\w+)\s+\*+/;
 	        next if exists ${$struct_log}{$1};
-		verbose "processing $1\n";
 	        ${$struct_log}{$1} = undef;
-	        #print "struct $1\n";
 	        $cb_count += get_cb_rec("${prfx}$type->", $struct_log, $1, $file_hint);
 	}
+	#TODO: Cache results
 	return $cb_count;
-
 }
 
 sub dump_local_stats {
@@ -1104,7 +1153,7 @@ sub assess_mapped {
 		} else {
 			verbose "NaN|$stop\n";
 		}
-		$stop_recurse += $stop;
+		$stop_recurse++;#= $stop;
 	}
 	$fld = $map_field if defined $map_field;
 	trace "[$CURR_FUNC]$def|$match|$var|$fld\n";
@@ -1124,7 +1173,7 @@ sub assess_mapped {
 			trace "MISSING: assignment\n";
 		} elsif ($def =~ /\w\s+$var\W/) {
 			#not a pointer
-			trace "HEAP: mapped\n";
+			trace "HEAP: mapped:$def:$match\n";
 		}
 	}
 	#MARK: 0. Gine a func that extracts the assignmebt ot $var $fielsd;
