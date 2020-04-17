@@ -285,6 +285,7 @@ sub extract_assignmet {
 	#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
 	warning "Unhandled assignment: $str\n" and return (undef, 1) if ($#str > 1);
 
+	verbose "$str[$#str]\n";
 	if ($str[$#str] =~ /\W(\w+)\s*\(/) {
 		my @type_C = grep(/$1/, @type_C_funcs);
 		if (@type_C) {
@@ -315,7 +316,7 @@ sub extract_assignmet {
 			#TODO: identify skb alloc funciions
 			return (undef, 1);
 		}
-		unless (($str eq 'NULL') or ($str =~ /^\d$/)) {
+		unless (($str =~ /NULL/) or ($str =~ /^\d$/)) {
 			trace "REPLACE: $str\n";
 			return $str, 1;
 		} else {
@@ -448,12 +449,12 @@ sub read_struct_cscope {
 
 	for (@out) {
 		chomp;
-		if (($_ =~ /struct\s+$type\s*{/) or ($_ =~ /^}\s*$type\s*;/)){
+		if (($_ =~ /struct\s+$type\s*{/) or ($_ =~ /\d+\s+}\s*$type\s*;/)){
 			$idx = $i;
 			$cnt++;
 			verbose "CSCOPE[C:Match$idx]: $_\n";
 		} else {
-			verbose "CSCOPE[C]: $_\n";
+			verbose "CSCOPE[C]: $_|$type|\n";
 		}
 		$i++;
 	}
@@ -466,7 +467,7 @@ sub read_struct_cscope {
 		verbose "CSCOPE down succeeded\n";
 		return read_down \@file_text, $line -1;
 
-	} elsif ($file_text[$line -1] =~ /^}\s*$type\s*;/){
+	} elsif ($file_text[$line -1] =~ /}\s*$type\s*;/){
 		verbose "CSCOPE up succeeded\n";
 		return read_up \@file_text, $line -1;
 	} else {
@@ -1014,7 +1015,10 @@ sub get_biggest_mapped {
 	unless ($param =~ /&(\w+)\W*/) {
 		my $tmp = $param;
 		$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*$/);
-		#$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/);
+		if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/) {
+			$field = $1; #if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/);
+			verbose "DBG_ARR:: $CURR_DEF_DEPTH :$param:$match:$field\n";
+		}
 	}
 	#else {
 	#	trace "Skipping Field: $match\n";
@@ -1123,6 +1127,12 @@ sub find_assignment {
 					verbose "False Positive: $str|$param|$field\n";
 				}
 			} else {
+				my $assignment = 'NaN';
+				if ($str =~ /([\w\s\*]+$pattern\s*=[^=].*)\s*[;,\+]/) {
+					verbose "DBG_ASS: $str|->$1\n";
+					$str = $1;
+				}
+
 				trace "ASSIGNMENT [P]: $line : $str\n";
 				push @assignments, $str;
 			}
@@ -1300,9 +1310,15 @@ sub parse_file_line {
 		trace "DBG: ERROR: Invalid path $str\n";
 		return ;
 	}
+	if ($var =~ /^\s*\([\w\s\*]+\)\s*\w+/) {
+		my $tmp = $var;
+		$tmp =~ s/^\s*\([\w\s\*]+\)\s*//;
+		verbose "DBG: $var -> $tmp\n";
+		$var = $tmp;
+	}
 	if ($var =~ /\s+/) {
 		my @var = split /\s+/, $var;
-		trace "DBG: $var -> $var[0] ($#var)\n";
+		verbose "DBG: $var -> $var[0] ($#var)\n";
 		$var = $var[0];
 	}
 	my $fld = 'NaN';
