@@ -206,7 +206,11 @@ sub extract_var {
 		panic "shit...[$str]\n" unless $str =~ /^[\w&>\-\.]+$/;
 	}
 	if ($str =~ /([\w&>\-\.]+)\s*[\[;\+]/) {
-		return $1;
+		my $var = $1;
+		if ($str =~ /$var\s*(\[.*\])/) {
+			$var = "$var$1";
+		}
+		return $var;
 	} else {
 		warning "No Match...[$str]\n";
 		return $str;
@@ -535,7 +539,7 @@ sub prep_build_skb {
 
 	foreach (@callers) {
 		$i++;
-		print CYAN, "VULNERABILITY: $i) $_", RESET;
+		print CYAN, "BUILD_SKB: $i) $_", RESET;
 	}
 }
 
@@ -1005,7 +1009,7 @@ sub get_biggest_mapped {
 	unless ($param =~ /&(\w+)\W*/) {
 		my $tmp = $param;
 		$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*$/);
-		$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/);
+		#$field = $1 if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/);
 	}
 	#else {
 	#	trace "Skipping Field: $match\n";
