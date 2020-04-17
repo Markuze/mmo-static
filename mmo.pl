@@ -1026,7 +1026,8 @@ sub get_biggest_mapped {
 		$line = next_line($file, $line);
 
 		#if ($$file[$line] =~ /^\s+struct\s+(\w+)\s+[\s\*\w\,]+,\s*$match\s*[;,]/) {
-		if ($$file[$line] =~ /^[,\s\w\*]+,\s*\**\s*$match\W.*;/) {
+		if (($$file[$line] =~ /^[,\s\w\*]+,\s*\**\s*$match\W.*;/) or
+			($$file[$line] =~ /^[,\s\w\*]+,\s*\**\s*$match\s*;/)) {
 			verbose "Possible match: $$file[$line]:$match\n";
 
 			$line-- and next if ($$file[$line] =~ /\)\s*;/);
@@ -1048,7 +1049,7 @@ sub get_biggest_mapped {
 			}
 			$f_type = $type unless defined $f_type;
 			trace "Biggest: $str|$type|$match|$fld|$f_type\n";
-			return undef;
+			return $str, $type, $match, $field, $f_type;
 		}
 
 		if ($$file[$line] =~ /(\w+)[\s\*]+$match\W/) {
@@ -1059,6 +1060,7 @@ sub get_biggest_mapped {
 			$line-- and next if ($str =~ /[%\"]+/);
 			$line-- and next if ($str =~ /\\n\"]+/);
 			$line-- and next if ($type eq 'return');
+			$line-- and next if ($type eq 'sizeof');
 			$line-- and next if ($$file[$line] =~ /(\w+)[\s\*]+$match\-/);
 
 			if ($type eq 'struct') {
@@ -1238,7 +1240,10 @@ sub assess_mapped {
 		$stop_recurse++;#= $stop;
 	}
 	$fld = $map_field if defined $map_field;
-	trace "[$CURR_FUNC]$def|$match|$var|$fld\n";
+
+	my $PRFX = ($match =~ /&/) ? "HEAP_DBG" : "";
+	trace "$PRFX:$def:$match\n" unless $def =~ /\*+\s*$var/;
+	trace "$PRFX:[$CURR_FUNC]$def|$match|$var|$fld\n";
 	#Need a XOR relstionship
 	unless ($stop_recurse > 0) {
 		if ($def =~ /$CURR_FUNC\s*\(/) {
