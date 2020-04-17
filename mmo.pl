@@ -184,10 +184,10 @@ sub add_assignment_func {
 sub extract_var {
 	my $str = shift;
 
-	verbose "$str\n";
+	verbose "extract_var[1]: $str\n";
 	$str =~ s/\([\w\s]+\*\s*\)//;
 	$str =~ s/\(\s*unsigned\s+long\s*\)//;
-	verbose "$str\n";
+	verbose "extract_var[2]: $str\n";
 
 	if ($str =~ /\+/) {
 		$str =~ s/^\s+//;
@@ -205,15 +205,21 @@ sub extract_var {
 
 		panic "shit...[$str]\n" unless $str =~ /^[\w&>\-\.]+$/;
 	}
+	if ($str =~ /[\(\)]/) {
+		my $tmp = $str;
+		$tmp =~ s/[\(\)]//g;
+		verbose "Removing (): $str|->|$tmp\n";
+		$str = $tmp;
+	}
 	if ($str =~ /([\w&>\-\.]+)\s*[\[;\+]/) {
 		my $var = $1;
 		if ($str =~ /$var\s*(\[.*\])/) {
 			$var = "$var$1";
-			my $tmp = $var;
-
 			$var =~ s/\[.*\]/\[i\]/;
-			verbose "Experiment: |$tmp|->|$var|\n";
-
+			if ($str =~ /\]([^\s,;]+)/) {
+				verbose "DBG_DEEPER: $str |$var|$1\n";
+				$var = "$var$1";
+			}
 		}
 		return $var;
 	} else {
@@ -949,7 +955,7 @@ sub cscope_recurse {
 }
 
 sub handle_field {
-	my ($type, $field) = @_;
+	my ($type, $field, $arr_entry) = @_;
 	my $f_type = undef;
 	#if (defined $field) {
 	my $out = read_struct $type;
@@ -972,7 +978,7 @@ sub handle_field {
 		}
 		verbose "Field: ($#def)$def[$idx]";
 		for my $def (@def) {
-			if ($def =~ /\W$field\[/) {
+			if ($arr_entry == 0 and $def =~ /\W$field\[/) {
 				verbose "Field is not needed: $type\n";
 				#$field = undef;
 				warning "Please validte this\n"  if ($#def > 0);
@@ -1004,6 +1010,7 @@ sub get_biggest_mapped {
 	my ($file, $line, $param) = @_;
 	my $match = $param;
 	my $f_type = undef;
+	my $arr_entry = 0;
 	my $fld = 'NaN';
 	my $field;
 
@@ -1018,13 +1025,14 @@ sub get_biggest_mapped {
 		if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/) {
 			$field = $1; #if ($tmp=~ /[>\.]([\w]+)\s*\[.*\]\s*$/);
 			verbose "DBG_ARR:: $CURR_DEF_DEPTH :$param:$match:$field\n";
+			$arr_entry = 1;
 		}
 	}
 	#else {
 	#	trace "Skipping Field: $match\n";
 	#}
 	$fld = $field if defined $field;
-	verbose "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld\n";
+	verbose "GET_DEF: $CURR_DEF_DEPTH :$param:$match:$fld:$arr_entry\n";
 
 	while ($line > 0) {
 		$line = next_line($file, $line);
@@ -1047,7 +1055,7 @@ sub get_biggest_mapped {
 
 			if (defined $field) {
 				my $ok;
-				($ok, $f_type) = handle_field $type, $field;
+				($ok, $f_type) = handle_field $type, $field, $arr_entry;
 				return undef unless defined $ok;
 				$fld = $field;
 			}
@@ -1078,7 +1086,7 @@ sub get_biggest_mapped {
 
 			if (defined $field) {
 				my $ok;
-				($ok, $f_type) = handle_field $type, $field;
+				($ok, $f_type) = handle_field $type, $field, $arr_entry;
 				return undef unless defined $ok;
 			}
 			$f_type = $type unless defined $f_type;
