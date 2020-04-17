@@ -1047,6 +1047,8 @@ sub get_biggest_mapped {
 			my $str = linearize $file, $line;
 			my $fld = 'NaN';
 			#sometimes happens with global vars
+			$line-- and next if ($str =~ /[%\"]+/);
+			$line-- and next if ($str =~ /\\n\"]+/);
 			$line-- and next if ($type eq 'return');
 			$line-- and next if ($$file[$line] =~ /(\w+)[\s\*]+$match\-/);
 
@@ -1216,7 +1218,7 @@ sub assess_mapped {
 				${$aliaces}{$rc} = undef;
 				trace "ASSIGNMENT: Recurse on assignment: $_ ($rc)\n" if defined $rc;
 				inc_def_depth;
-				assess_mapped($file, $line -1, $rc, $map_field, $aliaces);
+				assess_mapped($file, $line -1, $rc, undef, $aliaces);
 				$CURR_DEF_DEPTH--;
 			} else {
 				trace "DBG: Endless Looop: $_ ($rc)\n" if defined $rc;
