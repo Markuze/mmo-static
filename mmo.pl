@@ -209,6 +209,11 @@ sub extract_var {
 		my $var = $1;
 		if ($str =~ /$var\s*(\[.*\])/) {
 			$var = "$var$1";
+			my $tmp = $var;
+
+			$var =~ s/\[.*\]/\[i\]/;
+			verbose "Experiment: |$tmp|->|$var|\n";
+
 		}
 		return $var;
 	} else {
