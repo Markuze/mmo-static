@@ -614,7 +614,7 @@ sub get_cb_rec {
 	if (@cb > 0) {
 		my $num = @cb;
 		if ($prfx eq '') {
-		        trace(" $num Callbacks exposed in ${prfx}$type\n");
+		        trace("DIRECT: $num Callbacks exposed in ${prfx}$type\n");
 		}
 		#print "@cb\n" if defined $verbose;
 		$cb_count += $num;
@@ -625,8 +625,9 @@ sub get_cb_rec {
 	        /^\s*struct\s+(\w+)\s+\w+.*;/;
 	        next if exists ${$struct_log}{$1};
 	        ${$struct_log}{$1} = undef;
-		verbose "get_cb_rec:$_:$1\n";
-	        $cb_count += get_cb_rec("${prfx}$type.", $struct_log, $1, $file_hint);
+		verbose "DBG_get_cb_rec:$_:$1\n";
+	        #$cb_count += get_cb_rec("${prfx}$type.", $struct_log, $1, $file_hint);
+	        $cb_count += get_cb_rec($prfx, $struct_log, $1, $file_hint);
 	}
 
 	@st = grep(/^\s*struct\s+(\w+)\s+\*+/, @{$struct});
@@ -1220,6 +1221,12 @@ sub assess_mapped {
 	my ($def, $type, $var, $var_field, $f_type) = get_biggest_mapped $file, $line, $match;
 
 	warning "Unhandled Case\n" and return unless defined $def;
+
+	my $PRFX = ($match =~ /&/) ? "HEAP_DBG" : "";
+	if (defined $def) {
+		trace "$PRFX>$def:$match\n" unless $def =~ /\*+\s*$var/;
+	}
+
 	unless (defined $map_field) {
 		trace "Biggest mapped type: $f_type\n";
 		if ($type eq 'sk_buff') {
@@ -1262,9 +1269,7 @@ sub assess_mapped {
 	}
 	$fld = $map_field if defined $map_field;
 
-	my $PRFX = ($match =~ /&/) ? "HEAP_DBG" : "";
-	trace "$PRFX:$def:$match\n" unless $def =~ /\*+\s*$var/;
-	trace "$PRFX:[$CURR_FUNC]$def|$match|$var|$fld\n";
+	trace "[$CURR_FUNC]$def|$match|$var|$fld\n";
 	#Need a XOR relstionship
 	unless ($stop_recurse > 0) {
 		if ($def =~ /$CURR_FUNC\s*\(/) {
