@@ -294,31 +294,39 @@ sub extract_assignmet {
 	#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
 	warning "Unhandled assignment: $str\n" and return (undef, 1) if ($#str > 1);
 
-	verbose "$str[$#str]\n";
-	if ($str[$#str] =~ /\W(\w+)\s*\(/) {
+	$str =$str[$#str];
+	if ($str =~ /\[.*\]/) {
+		my $tmp = $str;
+		$tmp =~ s/\[[^\[\]]+\]/\[i\]/g;
+		verbose "CHANGE:$str-> $tmp\n";
+		$str = $tmp;
+	}
+
+	verbose "Extract_assignmet:$str\n";
+	if ( $str =~ /\W(\w+)\s*\(/) {
 		my @type_C = grep(/$1/, @type_C_funcs);
 		if (@type_C) {
 			trace "VULNERABILITY: Type C Vulnerability: may expose shared_info\n";
 			$stop = 1;
 		}
-		elsif ($str[$#str] =~ /alloc|get.*_page/) {
-			trace "SLUB: allocation $str[$#str]\n";
+		elsif ($str =~ /alloc|get.*_page/) {
+			trace "SLUB: allocation $str\n";
 			$stop = 1;
-		} elsif ($str[$#str] =~ /scsi_cmd_priv\s*\((.*)\)/) {
+		} elsif ($str =~ /scsi_cmd_priv\s*\((.*)\)/) {
 			trace "VULNERABILITY: scsi_cmnd_priv: exposes scsi_cmnd: $str\n";
 			add_assignment_func 'scsi_cmnd_priv';
 			$stop = 1;
 			#TODO: Any point in tracing?
 		} else {
 			my $func = 'nan';
-			if ($str[$#str] =~ /(\w+)\s*\(/) {
+			if ($str =~ /(\w+)\s*\(/) {
 				$func = $1;
 			}
 			trace "UNHANDLED FUNCTION: $str:$func\n";
 			add_assignment_func $func;
 		}
 	} else {
-		$str = extract_var $str[$#str];
+		$str = extract_var $str;
 
 		if ($str =~ /skb.*\->data/) {
 			trace "RISK:[SKB] [$str]skb->data exposes sh_info\n";
