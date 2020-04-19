@@ -282,6 +282,9 @@ sub get_param {
 	return ($i, $type);
 }
 
+###TODO:
+my @priv_funcs = qw(netdev_priv aead_request_ctx scsi_cmd_priv);
+
 sub extract_assignmet {
 	my $str = shift;
 	my $stop = 0;
