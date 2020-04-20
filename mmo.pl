@@ -284,18 +284,38 @@ sub get_param {
 }
 
 ###TODO:
-my @priv_funcs = qw(netdev_priv aead_request_ctx scsi_cmd_priv);
+my @priv_funcs = qw(netdev_priv aead_request_ctx scsi_cmd_priv _request_ctx);
+
+sub extract_and_check_var {
+	my $str = extract_var shift;
+	my $stop = 0;
+
+	if ($str =~ /skb.*\->data/) {
+		trace "RISK:[SKB] [$str]skb->data exposes sh_info\n";
+		#TODO: identify skb alloc funciions
+		return undef, 1;
+	}
+	unless (($str =~ /NULL/) or ($str =~ /^\d$/)) {
+		trace "REPLACE: $str\n";
+		return $str, 1;
+	} else {
+		trace "Trivial: $str\n";
+		$stop = 0;
+	}
+	return undef, $stop;
+}
 
 sub extract_assignmet {
 	my $str = shift;
 	my $stop = 0;
+	my $rc = undef;
 	my @str = split /=/, $str;
 
 	#$str =~ s/^\([^\(\)]+\)//g;
 	#$str =~ s/[^\w\s]\([^\(\)]+\)//g;
 	warning "Unhandled assignment: $str\n" and return (undef, 1) if ($#str > 1);
 
-	$str =$str[$#str];
+	$str = $str[$#str];
 	if ($str =~ /\[.*\]/) {
 		my $tmp = $str;
 		$tmp =~ s/\[[^\[\]]+\]/\[i\]/g;
@@ -318,6 +338,10 @@ sub extract_assignmet {
 			add_assignment_func 'scsi_cmnd_priv';
 			$stop = 1;
 			#TODO: Any point in tracing?
+		} elsif ($str =~ /PTR_ALIGN\s*\((.*),.*\)/) {
+			trace "PTR_ALIGN: $1 |$verbose\n";
+			($str, $stop) = extract_and_check_var $1;
+			return $str, $stop;
 		} else {
 			my $func = 'nan';
 			if ($str =~ /(\w+)\s*\(/) {
@@ -327,22 +351,10 @@ sub extract_assignmet {
 			add_assignment_func $func;
 		}
 	} else {
-		$str = extract_var $str;
-
-		if ($str =~ /skb.*\->data/) {
-			trace "RISK:[SKB] [$str]skb->data exposes sh_info\n";
-			#TODO: identify skb alloc funciions
-			return (undef, 1);
-		}
-		unless (($str =~ /NULL/) or ($str =~ /^\d$/)) {
-			trace "REPLACE: $str\n";
-			return $str, 1;
-		} else {
-			trace "Trivial: $str\n";
-			$stop = 0;
-		}
+		($str, $stop) = extract_and_check_var $str;
+		$rc = $str;
 	}
-	return (undef, $stop);
+	return ($rc, $stop);
 }
 
 sub get_struct_from_perma_cache {
