@@ -41,6 +41,7 @@ my $CURR_FILE = undef; #per thread variable
 my $CURR_FUNC = undef; #per thread variable
 my $CURR_DEPTH = 0;
 my $CURR_DEF_DEPTH = 0;
+my $MAP_DIRECTION = undef;
 my $CURR_DEPTH_MAX : shared = 0;
 my $CURR_DEF_DEPTH_MAX : shared = 0;
 my @REC_HEAP = ();
@@ -1072,7 +1073,7 @@ sub get_biggest_mapped {
 				$fld = $field;
 			}
 			$f_type = $type unless defined $f_type;
-			trace "Biggest: $str|$type|$match|$fld|$f_type\n";
+			verbose "Biggest: $str|$type|$match|$fld|$f_type\n";
 			return $str, $type, $match, $field, $f_type;
 		}
 
@@ -1102,7 +1103,7 @@ sub get_biggest_mapped {
 				return undef unless defined $ok;
 			}
 			$f_type = $type unless defined $f_type;
-			trace "Biggest: $str|$type|$match|$fld|$f_type\n";
+			verbose "Biggest: $str|$type|$match|$fld|$f_type\n";
 			return $str, $type, $match, $field, $f_type;
 		}
 		$line--;
@@ -1141,7 +1142,7 @@ sub find_assignment {
 			verbose "$str|$param|$fld\n";
 			if (defined $field) {
 				if ($str =~ /$param.*[>\.]$field/) {
-					trace "ASSIGNMENT [F]: $line : $str\n";
+					trace "ASSIGNMENT [$CURR_FUNC:$line] : $str\n";
 					push @assignments, $str;
 				} else {
 					verbose "False Positive: $str|$param|$field\n";
@@ -1153,7 +1154,7 @@ sub find_assignment {
 					$str = $1;
 				}
 
-				trace "ASSIGNMENT [P]: $line : $str\n";
+				trace "ASSIGNMENT [$CURR_FUNC:$line] : $str\n";
 				push @assignments, $str;
 			}
 		}
@@ -1236,7 +1237,7 @@ sub assess_mapped {
 	}
 
 	unless (defined $map_field) {
-		trace "Biggest mapped type: $f_type\n";
+		trace "* mapped type *: $f_type\n";
 		if ($type eq 'sk_buff') {
 			trace "SKB: exposes shared_info\n";
 			#TODO: Also search for  build skb
@@ -1245,7 +1246,7 @@ sub assess_mapped {
 
 		my $cb_count = handle_biggest_type($file, $f_type);
 		if (defined $cb_count and $cb_count > 0) {
-			trace "VULNERABILITY FOUND :$cb_count callbacks in $f_type\n";
+			trace "*** Vulnerability ***:$cb_count reachable via sturct $f_type: $MAP_DIRECTION\n";
 			#TODO:  a. check if heap/slab,
 			# 	b. dont care if bigger  struct is mapped.
 			return;
@@ -1277,7 +1278,7 @@ sub assess_mapped {
 	}
 	$fld = $map_field if defined $map_field;
 
-	trace "[$CURR_FUNC]$def|$match|$var|$fld\n";
+	verbose "[$CURR_FUNC]$def|$match|$var|$fld\n";
 	#Need a XOR relstionship
 	unless ($stop_recurse > 0) {
 		if ($def =~ /$CURR_FUNC\s*\(/) {
@@ -1317,12 +1318,11 @@ sub parse_file_line {
 
 	verbose "begin: $str: $linear\n";
 
+	my @vars = split /,/, $linear;
 	if ($entry_num == 0) {
-		my @vars = split /,/, $linear;
 		$vars[0] =~ s/\(\s*//;
 		$var = $vars[0];
 	} else {
-		my @vars = split /,/, $linear;
 		$vars[$#vars] =~ s/\).*//;
 		panic("ERROR: NO Match: $linear\n") unless ($#vars > -1 or $entry_num > $#vars);
 		panic("ERROR: Undefined: $linear [$entry_num/$#vars]\n") unless (defined $vars[$entry_num]);
@@ -1334,6 +1334,11 @@ sub parse_file_line {
 		trace "DBG: ERROR: Invalid path $str\n";
 		return ;
 	}
+
+	unless (defined $MAP_DIRECTION) {
+		$MAP_DIRECTION = $vars[$dir_entry];
+	}
+
 	if ($var =~ /^\s*\([\w\s\*]+\)\s*\w+/) {
 		my $tmp = $var;
 		$tmp =~ s/^\s*\([\w\s\*]+\)\s*//;
@@ -1347,7 +1352,7 @@ sub parse_file_line {
 	}
 	my $fld = 'NaN';
 	$fld = $field if defined $field;
-	trace "CALL:$CURR_FUNC:$line) $str\n";
+	trace "CALL [$CURR_FUNC:$line]: $str\n";
 	verbose "Searching for: $var [$fld]\n";
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
@@ -1376,6 +1381,7 @@ sub start_parsing {
 				$CALLEE = 'map_single';#TODO: Fix to match actual root func
 				$CURR_DEPTH = 0;
 				$CURR_DEF_DEPTH = 0;
+				$MAP_DIRECTION = undef;
 				${$file}{$_} = \@trace;
 				$CURR_STACK = \@trace;
 				new_verbose "$CURR_FUNC: $_\n";
@@ -1442,7 +1448,11 @@ my @other = ();
 
 my $cnt = 0;
 my $err = 0;
+my $vul_cnt = 0;
+my $skb_cnt = 0;
 foreach my $file (keys %cscope_lines) {
+	my $vul_found = 0;
+	my $skb_found = 0;
 	$cnt++;
 	foreach my $line (keys %{$cscope_lines{$file}}) {
 		my $trace = $cscope_lines{$file}{$line};
@@ -1451,14 +1461,29 @@ foreach my $file (keys %cscope_lines) {
 		print WHITE, "$file:$line <$ref>\n", RESET;
 		error "$file:$line\n" unless ($ref eq 'ARRAY');
 		$err++ unless ($ref eq 'ARRAY');
+
+		my @vul = grep(/VULNERABILITY/, @{$trace});
+		if (@vul) {
+			$vul_found++;
+		}
+		@vul = grep(/SKB:/, @{$trace});
+		if (@vul) {
+			$skb_found++;
+		}
 		while (@{$trace}) {
 			my $str = pop @{$trace};
 			print GREEN, $str ,RESET;
 		}
 	}
+	$vul_cnt++ if $vul_found > 0;
+	$skb_cnt++ if $skb_found > 0;
+;
 }
+
 foreach my $func (sort {$assignment_funcs{$a} <=> $assignment_funcs{$b}} keys %assignment_funcs) {
 	print BLUE, "$func:$assignment_funcs{$func}\n";
 }
 print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET;
+print BOLD, BLUE, "Vulnerability found in $vul_cnt files\n" ,RESET;
+print BOLD, BLUE, "SKB Vulnerability found in $skb_cnt files\n" ,RESET;
 #start_parsing;
