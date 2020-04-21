@@ -30,7 +30,7 @@ my $TRY_CONFIG = undef;
 my $FH;
 my $TID;
 
-my @type_C_funcs = qw(page_frag_alloc netdev_alloc napi_alloc); #TODO: recurse and collect callers untill all are exported.
+my @type_C_funcs = qw(page_frag_alloc netdev_alloc_frag napi_alloc_frag); #TODO: recurse and collect callers untill all are exported.
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my %exported_symbols : shared = ();
@@ -123,12 +123,13 @@ sub alert {
 	}
 	print $FH BOLD, MAGENTA, $prfx, @_, RESET;
 	print BOLD, MAGENTA, $prfx, @_, RESET;
-	push @{$CURR_STACK}, "@_" if defined $CURR_STACK;
+	push @{$CURR_STACK}, "ALERT: @_" if defined $CURR_STACK;
 }
 
 sub warning {
 	$FH = *STDOUT unless defined $FH;;
 	print $FH BOLD, YELLOW, @_, RESET;
+	push @{$CURR_STACK}, "WARNING: @_" if defined $CURR_STACK;
 }
 
 sub get_next {
@@ -190,6 +191,11 @@ sub extract_var {
 	$str =~ s/\(\s*unsigned\s+long\s*\)//;
 	verbose "extract_var[2]: $str\n";
 
+	if ($str =~ /\w\s+-\s+\s\w/) {
+		my @split = split /\s+-\s+/, $str;
+		trace "extract_var: $str|$split[0]\n";
+		$str = $split[0];
+	}
 	if ($str =~ /\+/) {
 		$str =~ s/^\s+//;
 		$str =~ s/\s+$//;
@@ -204,6 +210,8 @@ sub extract_var {
 		$str =~ s/^\(+//;
 		$str =~ s/\)+$//;
 
+		$str =~ s/^\s+//;
+		$str =~ s/\s+$//;
 		panic "shit...[$str]\n" unless $str =~ /^[\w&>\-\.]+$/;
 	}
 	if ($str =~ /[\(\)]/) {
@@ -284,7 +292,7 @@ sub get_param {
 }
 
 ###TODO:
-my @priv_funcs = qw(netdev_priv aead_request_ctx scsi_cmd_priv _request_ctx);
+my @priv_funcs = qw(netdev_priv aead_request_ctx scsi_cmd_priv _request_ctx); #akcipher_request_ctx
 
 sub extract_and_check_var {
 	my $str = extract_var shift;
@@ -330,7 +338,7 @@ sub extract_assignmet {
 			trace "VULNERABILITY: Type C Vulnerability: may expose shared_info\n";
 			$stop = 1;
 		}
-		elsif ($str =~ /alloc|get.*_page/) {
+		elsif ($str =~ /alloc\w+\s*\(|get.*_page/) {
 			trace "SLUB: allocation $str\n";
 			$stop = 1;
 		} elsif ($str =~ /scsi_cmd_priv\s*\((.*)\)/) {
