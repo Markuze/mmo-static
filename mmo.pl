@@ -309,7 +309,7 @@ sub get_param {
 	foreach (@vars) {
 		if (/\W$match\W*/) {
 			$type = $_;
-			$type =~ /(\w+)[\*\s]+$match/;
+			$type =~ /(\w+)[\*\s]+$match\W/;
 			$type = $1 if defined $1;
 			trace "DECLARATION: $_: $type\n";
 			last;
