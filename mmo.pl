@@ -35,6 +35,7 @@ my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my %exported_symbols : shared = ();
 my %assignment_funcs : shared = ();
+my %alloc_funcs : shared = ();
 my %global_struct_cache : shared = ();
 
 my $CURR_FILE = undef; #per thread variable
@@ -53,6 +54,7 @@ my %struct_cache = ();
 my %local_struct_cache = ();
 my %local_stats = ();
 my %cached_struct_cb_count = ();
+my %cached_direct_cb_count = ();
 
 my $DBG_CACHE = "DBG_CACHE::";
 ####################### INIT #####################
@@ -155,16 +157,32 @@ sub inc_depth {
 	}
 }
 
+sub add_cached_direct_cb_count {
+	my ($type, $cnt) = @_;
+	verbose "storring direct: $type: $cnt\n";
+	$cached_direct_cb_count{$type} = $cnt;
+}
+
+sub get_cached_direct_cb_count {
+	my $type = shift;
+	my $cnt =  $cached_direct_cb_count{$type};
+	my $str = defined $cnt ? $cnt : "NaN";
+	verbose "returning direct: $type: $str\n";
+	return defined $cnt ? $cnt : 0;
+}
+
 sub add_cached_struct_cb_count {
 	my ($type, $cnt) = @_;
-	verbose "torring: $type: $cnt\n";
+	verbose "storing: $type: $cnt\n";
 	$cached_struct_cb_count{$type} = $cnt;
 }
 
 sub get_cached_struct_cb_count {
 	my $type = shift;
 	my $cnt =  $cached_struct_cb_count{$type};
-	verbose "returning: $type: $cnt\n";
+	my $str = defined $cnt ? $cnt : "NaN";
+	verbose "returning: $type: $str\n";
+	return $cnt;
 }
 
 sub check_exported {
@@ -177,6 +195,12 @@ sub add_exported {
 	my $name = shift;
 	lock %exported_symbols;
 	$exported_symbols{"$name"} = 1;
+}
+
+sub add_alloc_func {
+	my $name = shift;
+	lock %alloc_funcs;
+	$alloc_funcs{"$name"}++;
 }
 
 sub add_assignment_func {
@@ -341,20 +365,31 @@ sub extract_assignmet {
 	verbose "Extract_assignmet:$str\n";
 	if ( $str =~ /\W(\w+)\s*\(/) {
 		my @type_C = grep(/$1/, @type_C_funcs);
+		$stop = 1;
 		if (@type_C) {
 			trace "VULNERABILITY: Type C Vulnerability: may expose shared_info\n";
-			$stop = 1;
-		}
-		elsif ($str =~ /alloc\w+\s*\(|get.*_page/) {
+		} elsif ($str =~ /(\w*alloc\w*)\s*\(|(\w*get\w*pages*)\s*\(/) {
+			panic "WTF?" unless (defined $1 or defined $2);
+			add_alloc_func defined $1 ? $1 : $2;
 			trace "SLUB: allocation $str\n";
-			$stop = 1;
 		} elsif ($str =~ /scsi_cmd_priv\s*\((.*)\)/) {
 			trace "VULNERABILITY: scsi_cmnd_priv: exposes scsi_cmnd: $str\n";
 			add_assignment_func 'scsi_cmnd_priv';
-			$stop = 1;
 			#TODO: Any point in tracing?
+		} elsif ($str =~ /current_buf\s*\((\w+)\)/) {
+			trace "VULNERABILITY: current_buff: exposes : $1\n";
+			add_assignment_func 'current_buff';
+			return ($1,1);
+		} elsif ($str =~ /(\w*_request_ctx)\s*\(\s*(\w+)/) {
+			trace "VULNERABILITY: $1: exposes state with callbacks: $2\n";
+			add_assignment_func $2;
+			return ($2,1);
 		} elsif ($str =~ /PTR_ALIGN\s*\((.*),.*\)/) {
 			trace "PTR_ALIGN: $1 |$verbose\n";
+			($str, $stop) = extract_and_check_var $1;
+			return $str, $stop;
+		} elsif ($str =~ /PAGE_ALIGN\s*\((.*)\)/) {
+			trace "PAGE_ALIGN: $1 |$verbose\n";
 			($str, $stop) = extract_and_check_var $1;
 			return $str, $stop;
 		} else {
@@ -638,13 +673,16 @@ sub get_cb_rec {
 	my ($prfx, $struct_log, $type, $file_hint) = @_;
 	my %struct_log;
 	my $cb_count;
+	my $direct;
 	my $struct;
 
 	$struct_log = \%struct_log unless defined $struct_log;
 	${$struct_log}{$type} = undef;
 
-	$cb_count = get_cached_direct_cb_count $type, $cb_count;
-	trace("DIRECT: $cb_count Callbacks exposed in ${prfx}$type\n") if defined $cb_count;
+	$cb_count = get_cached_direct_cb_count $type;
+	if (($prfx eq '') and $cb_count > 0) {
+		trace("DIRECT: $cb_count Callbacks exposed in ${prfx}$type\n");
+	}
 	$cb_count = get_cached_struct_cb_count $type;
 	return $cb_count if defined $cb_count;
 
@@ -658,20 +696,22 @@ sub get_cb_rec {
 		#print "@cb\n" if defined $verbose;
 		$cb_count += $num;
 	}
+	$direct = $cb_count;
 
 	my @st = grep(/^\s*struct\s+(\w+)\s+\w+.*;/, @{$struct});
 	foreach (@st) {
 	        /^\s*struct\s+(\w+)\s+\w+.*;/;
 	        next if exists ${$struct_log}{$1};
 	        ${$struct_log}{$1} = undef;
+		$direct += get_cached_direct_cb_count $1;
 		verbose "DBG_get_cb_rec:$_:$1\n";
 	        #$cb_count += get_cb_rec("${prfx}$type.", $struct_log, $1, $file_hint);
 	        $cb_count += get_cb_rec($prfx, $struct_log, $1, $file_hint);
 	}
 
-	if (($prfx eq '') and $cb_count > 0) {
-	        trace("DIRECT: $cb_count Callbacks exposed in ${prfx}$type\n");
-		add_cached_direct_cb_count $type, $cb_count;
+	if (($prfx eq '') and $direct > 0) {
+	        trace("DIRECT: $direct Callbacks exposed in ${prfx}$type\n");
+		add_cached_direct_cb_count $type, $direct;
 	}
 	@st = grep(/^\s*struct\s+(\w+)\s+\*+/, @{$struct});
 	foreach (@st) {
@@ -1295,7 +1335,7 @@ sub assess_mapped {
 	foreach (@{$assignments}) {
 		my ($rc, $stop) = extract_assignmet $_;
 		if (defined $rc) {
-			verbose "$rc|$stop\n";
+			verbose "ASSIGNMENT:$rc|$stop\n";
 			unless (exists ${$aliaces}{$rc}) {
 				${$aliaces}{$rc} = undef;
 				trace "ASSIGNMENT: Recurse on assignment: $_ ($rc)\n" if defined $rc;
@@ -1514,9 +1554,20 @@ foreach my $file (keys %cscope_lines) {
 ;
 }
 
-foreach my $func (sort {$assignment_funcs{$a} <=> $assignment_funcs{$b}} keys %assignment_funcs) {
-	print BLUE, "$func:$assignment_funcs{$func}\n";
+sub dump_hash {
+	my ($str, $hash) = @_;
+
+	print ITALIC, BLUE, "\n>>>>>$str\n";
+
+	foreach my $func (sort {$$hash{$a} <=> $$hash{$b}}
+								keys %{$hash}) {
+		print BLUE, "$func:$$hash{$func}\n";
+	}
 }
+
+dump_hash "ASSIGNMENT FUNCS", \%assignment_funcs;
+dump_hash "ALLOC FUNCS", \%alloc_funcs;
+
 print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET;
 print BOLD, BLUE, "Vulnerability found in $vul_cnt files\n" ,RESET;
 print BOLD, BLUE, "SKB Vulnerability found in $skb_cnt files\n" ,RESET;
