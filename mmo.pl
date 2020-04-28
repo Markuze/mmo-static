@@ -56,7 +56,7 @@ my %cached_struct_cb_count = ();
 
 my $DBG_CACHE = "DBG_CACHE::";
 ####################### INIT #####################
-my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32 assoc_array_ptr);
+my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32 assoc_array_ptr u_char);
 my %opts = ();
 my $argv = "@ARGV";
 getopts('vk:cx', \%opts);
@@ -157,12 +157,14 @@ sub inc_depth {
 
 sub add_cached_struct_cb_count {
 	my ($type, $cnt) = @_;
+	verbose "torring: $type: $cnt\n";
 	$cached_struct_cb_count{$type} = $cnt;
 }
 
 sub get_cached_struct_cb_count {
 	my $type = shift;
-	return $cached_struct_cb_count{$type};
+	my $cnt =  $cached_struct_cb_count{$type};
+	verbose "returning: $type: $cnt\n";
 }
 
 sub check_exported {
@@ -196,9 +198,11 @@ sub extract_var {
 		trace "extract_var: $str|$split[0]\n";
 		$str = $split[0];
 	}
+
+	$str =~ s/^\s+//;
+	$str =~ s/\s+$//;
+
 	if ($str =~ /\+/) {
-		$str =~ s/^\s+//;
-		$str =~ s/\s+$//;
 
 		my $idx = 0;
 		my @str = split /\s+/, $str;
@@ -219,6 +223,8 @@ sub extract_var {
 		$tmp =~ s/[\(\)]//g;
 		verbose "Removing (): $str|->|$tmp\n";
 		$str = $tmp;
+		$str =~ s/^\s+//;
+		$str =~ s/\s+$//;
 	}
 	if ($str =~ /([\w&>\-\.]+)\s*[\[;\+]/) {
 		my $var = $1;
@@ -230,9 +236,10 @@ sub extract_var {
 				$var = "$var$1";
 			}
 		}
+		$var =~ s/^\s+//;
+		$var =~ s/\s+$//;
 		return $var;
 	} else {
-		warning "No Match...[$str]\n";
 		return $str;
 	}
 }
@@ -496,6 +503,10 @@ sub read_struct_cscope {
 		}
 		$i++;
 	}
+	if ($cnt > 1) {
+		my @cb = grep($CURR_FILE, @out);
+		warning "Solvable issue $type\n" if @cb == 1;
+	}
 	verbose "CSCOPE: Cant cscope parse[$i:$idx:$cnt]\n" and return undef unless $cnt == 1;
 
 	my ($file, $tp, $line, @def) = split /\s+/, $out[$idx];
@@ -546,7 +557,7 @@ sub read_struct {
 	return $out if defined $out;
 
 	$name =~ s/\.c/\.o/;
-	warning "File not Found $name\n" unless -e $name;
+	verbose "File not Found $name\n" unless -e $name;
 
 	if (defined exists_in_cache($type)) {
 		verbose "$type exists in cache\n";
@@ -632,6 +643,8 @@ sub get_cb_rec {
 	$struct_log = \%struct_log unless defined $struct_log;
 	${$struct_log}{$type} = undef;
 
+	$cb_count = get_cached_direct_cb_count $type, $cb_count;
+	trace("DIRECT: $cb_count Callbacks exposed in ${prfx}$type\n") if defined $cb_count;
 	$cb_count = get_cached_struct_cb_count $type;
 	return $cb_count if defined $cb_count;
 
@@ -642,9 +655,6 @@ sub get_cb_rec {
 	my @cb = grep(/^\s*\w+\**\s+\(/, @{$struct});
 	if (@cb > 0) {
 		my $num = @cb;
-		if ($prfx eq '') {
-		        trace("DIRECT: $num Callbacks exposed in ${prfx}$type\n");
-		}
 		#print "@cb\n" if defined $verbose;
 		$cb_count += $num;
 	}
@@ -659,6 +669,10 @@ sub get_cb_rec {
 	        $cb_count += get_cb_rec($prfx, $struct_log, $1, $file_hint);
 	}
 
+	if (($prfx eq '') and $cb_count > 0) {
+	        trace("DIRECT: $cb_count Callbacks exposed in ${prfx}$type\n");
+		add_cached_direct_cb_count $type, $cb_count;
+	}
 	@st = grep(/^\s*struct\s+(\w+)\s+\*+/, @{$struct});
 	foreach (@st) {
 	        /^\s*struct\s+(\w+)\s+\*+/;
@@ -801,7 +815,7 @@ sub is_name_conflict {
 		#verbose "def: $test\n";
 		#if ($test =~ /EXPORT_SYMBOL\($CALLEE\)/) {
 		if ($test =~ /EXPORT\w*SYMBOL\w*/) {
-			warning "Ok symbol exported...:$test\n";
+			verbose "Ok symbol exported...:$test\n";
 			add_exported $cfunc;
 			return 1;
 		}
@@ -936,7 +950,7 @@ sub cscope_recurse {
 	# 1. False match - static funcs (filter).
 	# 2. Follow func ptrs (e.g., netdev_ops)
 	unless ($#cscope > -1) {
-		warning "Found NO callers for $CURR_FUNC!!!\n";
+		trace "* NO callers for $CURR_FUNC. [Maybe used as pointer]\n";
 		return;
 	}
 
@@ -1014,7 +1028,7 @@ sub handle_field {
 			if ($arr_entry == 0 and $def =~ /\W$field\[/) {
 				verbose "Field is not needed: $type\n";
 				#$field = undef;
-				warning "Please validte this\n"  if ($#def > 0);
+				#warning "Please validte this\n"  if ($#def > 0);
 			}
 			elsif ($def =~ /([\w\*\s]+)\s*\*+\s*$field/) {
 				$f_type = $1 if defined $1;
@@ -1249,7 +1263,7 @@ sub assess_mapped {
 
 	my ($def, $type, $var, $var_field, $f_type) = get_biggest_mapped $file, $line, $match;
 
-	warning "Unhandled Case\n" and return unless defined $def;
+	warning "Unhandled Case [$match]\n" and return unless defined $def;
 
 	my $PRFX = ($match =~ /&/) ? "HEAP_DBG" : "";
 	if (defined $def) {
