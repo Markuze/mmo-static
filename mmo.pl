@@ -1250,15 +1250,18 @@ sub find_assignment {
 #} else {
 #	$pattern = $param;
 #}
-	verbose "HERE: $CURR_FILE, |$param|$fld|$pattern|\n";
+	verbose "HERE: $CURR_FILE:$line|$param|$fld|$pattern|\n";
 	while ($line > 0) {
 		$line = next_line($file, $line);
 
-		return \@assignments if ($$file[$line] =~ /$CURR_FUNC\s*\(/);
-
-		if ($$file[$line] =~ /[\s\*]$pattern\s*=[^=]/) {
+		verbose "HERE:<func>: $line\n" and return \@assignments
+				if ($$file[$line] =~ /$CURR_FUNC\s*\(/);
+		verbose "$line:$pattern:$$file[$line]\n" if ($$file[$line] =~ /$pattern/);
+		if ($$file[$line] =~ /[\s\*]+$pattern\s*=/) {
+			$line-- and next
+				if ($$file[$line] =~ /[\s\*]+$pattern\s*==/);
 			my $str = linearize_assignment $file, $line, $param;
-			verbose "$str|$param|$fld\n";
+			verbose "HERE:<match>:$str|$param|$fld\n";
 			if (defined $field) {
 				if ($str =~ /$param.*[>\.]$field/) {
 					trace "ASSIGNMENT [$CURR_FUNC:$line] : $str\n";
@@ -1279,7 +1282,8 @@ sub find_assignment {
 		}
 		$line--;
 	}
-	return \@assignments;
+	verbose "HERE:<eof>: $line\n" and return \@assignments
+	#return \@assignments;
 }
 
 sub handle_biggest_type {
@@ -1409,7 +1413,7 @@ sub assess_mapped {
 			trace "REC: Recursing to callers: $def: $idx\n";
 			cscope_recurse $file, $def, $idx, $map_field;
 		} else {
-			warning "MISSING Assignment: $def\n";
+			warning "MISSING Assignment: $def:$match:$fld\n";
 		}
 	} else {
 			trace "STOP: mapped:$def:$match\n";
