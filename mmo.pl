@@ -219,7 +219,7 @@ sub extract_var {
 	$str =~ s/\(\s*unsigned\s+long\s*\)//;
 	verbose "extract_var[2]: $str\n";
 
-	if ($str =~ /\w\s+-\s+\s\w/) {
+	if ($str =~ /\w\s+\-\s+\w/) {
 		my @split = split /\s+-\s+/, $str;
 		trace "extract_var: $str|$split[0]\n";
 		$str = $split[0];
@@ -1104,12 +1104,16 @@ sub handle_field {
 			trace "Please debug $type - $field [$#def]\n";
 			return undef if $#def == -1;
 		}
-		verbose "Field: ($#def)$def[$idx]";
+		verbose "Field: ($#def)$def[$idx]\n";
 		for my $def (@def) {
-			if ($arr_entry == 0 and $def =~ /\W$field\[/) {
-				verbose "Field is not needed: $type\n";
-				#$field = undef;
-				#warning "Please validte this\n"  if ($#def > 0);
+			if ($def =~ /\W$field\[/) {
+				if ($arr_entry == 0 ) {
+					verbose "Field is not needed: $type\n";
+				} else {
+					$def =~ /([\w\*\s]+)\s*$field/;
+					$f_type = $1 if defined $1;
+					verbose "Field is needed: $f_type|$def";
+				}
 			}
 			elsif ($def =~ /([\w\*\s]+)\s*\*+\s*$field/) {
 				$f_type = $1 if defined $1;
@@ -1331,10 +1335,14 @@ sub assess_mapped {
 	if ($match =~ /(\w+)\(/) {
 		if ($1 =~ /skb_put|skb_tail/) { #TODO: add a list of skb->data functions
 			trace "SKB: exposes shared_info\n";
+			return;
+		} elsif ($match =~ /current_buf\(\s*(\w+)\W/) {
+			trace "VULNERABILITY: current_buf exposes $1\n";
+			$match = $1;
 		} else {
 			trace "MANUAL: Please review manualy ($match)\n";
+			return;
 		}
-		return;
 	}
 	if ($match =~ /\+/) {
 		my @var = split /\+/, $match;
@@ -1401,17 +1409,10 @@ sub assess_mapped {
 			trace "REC: Recursing to callers: $def: $idx\n";
 			cscope_recurse $file, $def, $idx, $map_field;
 		} else {
-			verbose "NO recurse: $def\n";
+			warning "MISSING Assignment: $def\n";
 		}
 	} else {
-		if ($def =~ /$CURR_FUNC\s*\(/) {
-			return;
-		} elsif (defined $map_field) {
-			trace "MISSING: assignment\n";
-		} elsif ($def =~ /\w\s+$var\W/) {
-			#not a pointer
-			trace "HEAP: mapped:$def:$match\n";
-		}
+			trace "STOP: mapped:$def:$match\n";
 	}
 	#MARK: 0. Gine a func that extracts the assignmebt ot $var $fielsd;
 	# Add loook for assignemnt with cscope
