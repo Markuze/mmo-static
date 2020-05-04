@@ -407,7 +407,7 @@ sub extract_assignmet {
 	return ($rc, $stop);
 }
 
-sub get_struct_from_perma_cache {
+sub __get_struct_from_perma_cache {
 	my $type = shift;
 	my $file = "$STRUCT_CACHE/$type.txt";
 
@@ -417,6 +417,23 @@ sub get_struct_from_perma_cache {
 	return undef if @text == 0;
 	verbose "PERMA: read $#{text} lines from $file\n";
 	return \@text;
+}
+
+sub get_prfx {
+	my $prfx = $CURR_FILE;
+	$prfx =~ s/\//_/g;
+	$prfx =~ s/\./_/g;
+	verbose "PRFX:$CURR_FILE>$prfx\n";
+	return "${prfx}_";
+}
+
+sub get_struct_from_perma_cache {
+	my $type = shift;
+	my $out  = __get_struct_from_perma_cache $type;
+	return $out if defined $out;
+
+	my $prfx = get_prfx();
+	return __get_struct_from_perma_cache "${prfx}$type";
 }
 
 sub add_struct_to_perma_cache {
@@ -443,7 +460,8 @@ sub add_struct_to_global_cache {
 
 sub add_to_struct_cache {
 	my ($type, $arr) = @_;
-	verbose "${DBG_CACHE}CACHE: Written $#{$arr} lines to cache\n" if defined $arr;
+	return unless defined $arr;
+	verbose "${DBG_CACHE}CACHE: Written $#{$arr} lines to cache\n";
 
 	$local_struct_cache{"$type"} = $arr;
 	add_struct_to_global_cache $type, $arr;
@@ -466,7 +484,7 @@ sub exists_in_global_cache {
 	return undef;
 }
 
-sub get_struct_from_cache {
+sub __get_struct_from_cache {
 	my $type = shift;
 	my $out;
 
@@ -478,6 +496,15 @@ sub get_struct_from_cache {
 	$local_stats{'global_struct_cache_hit'}++ if defined $out;
 	$local_stats{'global_struct_cache_miss'}++ unless defined $out;
 	return $out;
+}
+
+sub get_struct_from_cache {
+	my $type = shift;
+	my $out = __get_struct_from_cache $type;
+	return $out if defined $out;
+
+	my $prfx = get_prfx();
+	return __get_struct_from_cache "${prfx}$type";
 }
 
 sub exists_in_cache {
@@ -520,9 +547,9 @@ sub read_up {
 
 sub read_struct_cscope {
 	my $type = shift;
-	my $idx = 0;
+	my @cb;
 	my $cnt = 0;
-	my $i = 0;
+	my $prfx = undef;
 
 	my @out = qx(cscope -dL -1 $type);
 	verbose "cscope -dL -1 $type\n";
@@ -530,33 +557,37 @@ sub read_struct_cscope {
 	for (@out) {
 		chomp;
 		if (($_ =~ /struct\s+$type\s*{/) or ($_ =~ /\d+\s+}\s*$type\s*;/)){
-			$idx = $i;
+			verbose "CSCOPE[C:Match]: $_\n";
+			push @cb, $_;
 			$cnt++;
-			verbose "CSCOPE[C:Match$idx]: $_\n";
-		} else {
-			verbose "CSCOPE[C]: $_|$type|\n";
-		}
-		$i++;
+		} #else {
+		  #	verbose "CSCOPE[C]: $_|$type|\n";
+		  #}
+		  #$i++;
 	}
-	if ($cnt > 1) {
-		my @cb = grep($CURR_FILE, @out);
-		warning "Solvable issue $type\n" if @cb == 1;
-	}
-	verbose "CSCOPE: Cant cscope parse[$i:$idx:$cnt]\n" and return undef unless $cnt == 1;
 
-	my ($file, $tp, $line, @def) = split /\s+/, $out[$idx];
+	if ($cnt > 1) {
+		@cb = grep($CURR_FILE, @cb);
+		warning "Solvable issue $type\n" if @out == 1;
+		$cnt = @cb;
+		$prfx = get_prfx();
+	}
+	verbose "CSCOPE: Cant cscope parse [$cnt]\n" and return (undef,$prfx) unless $cnt == 1;
+
+	my ($file, $tp, $line, @def) = split /\s+/, $cb[0];
 	tie my @file_text, 'Tie::File', $file;
 
 	if ($file_text[$line -1] =~ /struct\s+$type\s*{/) {
 		verbose "CSCOPE down succeeded\n";
-		return read_down \@file_text, $line -1;
+		return read_down \@file_text, $line -1, $prfx;
 
 	} elsif ($file_text[$line -1] =~ /}\s*$type\s*;/){
 		verbose "CSCOPE up succeeded\n";
-		return read_up \@file_text, $line -1;
+		return read_up \@file_text, $line -1, $prfx;
 	} else {
 		verbose "CSCOPE failed [$file_text[$line -1]]\n";
 	}
+	return (undef, $prfx);
 }
 
 sub search_type_pahole {
@@ -584,6 +615,8 @@ sub read_struct {
 	my ($type, $name) = @_;
 	$name = $CURR_FILE unless defined $name;
 	my @out : shared;
+	my $cs_out;
+	my $prfx;
 
 	my $out = get_struct_from_cache $type;
 	return $out if defined $out;
@@ -598,12 +631,16 @@ sub read_struct {
 		verbose "$type exists in cache\n";
 		return undef;
 	}
+	($cs_out,$prfx) = read_struct_cscope $type;
+	return undef unless defined $cs_out or defined $prfx;
+	$prfx = "" unless defined $prfx;
 
 	for ("$name", $VMLINUX) {
 		next unless defined $_;
 		@out = qx(/usr/bin/pahole -C $type -EAa $_ 2>/dev/null);
 		if (@out) {
 			$out = \@out;
+			$type = "${prfx}$type";
 			add_to_struct_cache($type, \@out);
 			return $out;
 		}
@@ -613,9 +650,11 @@ sub read_struct {
 	add_to_struct_cache($type, $out) and return $out if defined $out;
 
 	##cscope for not compiled or missing debug info
-	$out = read_struct_cscope $type;
+	#$out = read_struct_cscope $type;
+	$out = $cs_out;
 	verbose "$DBG_CACHE:CSCOPE:$out\n" if defined $out;
 
+	$type = "${prfx}$type";
 	add_to_struct_cache($type, $out);
 	#TODO: Read from cscope if not found
 	return $out;
@@ -1391,6 +1430,9 @@ sub parse_file_line {
 	my $linear = extract_call_only $str, $CALLEE;
 
 	verbose "begin: $str: $linear\n";
+	if ($str =~ /^$CURR_FUNC\(|^[\w\s]+$CURR_FUNC\(*/) {
+		trace "DBG:CSCOPE_CALL:$str\n";
+	}
 
 	my @vars = split /,/, $linear;
 	if ($entry_num == 0) {
