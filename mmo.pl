@@ -58,7 +58,9 @@ my %cached_direct_cb_count = ();
 
 my $DBG_CACHE = "DBG_CACHE::";
 ####################### INIT #####################
-my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64 __u8 uint8_t uint16_t __le16 __le32 assoc_array_ptr u_char);
+my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64
+			__u8 uint8_t uint16_t __le16 __le32
+			__le64 assoc_array_ptr uchar u_char);
 my %opts = ();
 my $argv = "@ARGV";
 getopts('vk:cx', \%opts);
@@ -567,8 +569,8 @@ sub read_struct_cscope {
 	}
 
 	if ($cnt > 1) {
-		@cb = grep($CURR_FILE, @cb);
-		warning "Solvable issue $type\n" if @out == 1;
+		@cb = grep(/$CURR_FILE/, @cb);
+		warning "Solvable issue[?] $CURR_FILE:$type\n";
 		$cnt = @cb;
 		$prfx = get_prfx();
 	}
