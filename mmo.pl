@@ -51,6 +51,7 @@ my $CALLEE = undef; #per thread variable
 my $CURR_STACK = undef;
 my %struct_log = ();
 my %struct_cache = ();
+my %local_assignment_cache = ();
 my %local_struct_cache = ();
 my %local_stats = ();
 my %cached_struct_cb_count = ();
@@ -421,7 +422,15 @@ sub get_assignment_from_perma_cache {
 	return \@text;
 }
 
-sub add_assignmet_to_perma_cache {
+sub get_assignment_from_cache {
+	my $type = shift;
+	my $out = $local_assignment_cache{"$type"};
+
+	return $out if defined $out;
+	return get_assignment_from_perma_cache $type;
+}
+
+sub add_assignment_to_perma_cache {
 	my ($type, $arr) = @_;
 	my $file = "$STRUCT_CACHE/Assignment/$type.txt";
 
@@ -440,12 +449,12 @@ sub add_assignmet_to_perma_cache {
 sub get_assignment {
 	my $type = shift;
 
-	my $text = get_assignment_from_perma_cache $type;
+	my $text = get_assignment_from_cache $type;
 
 	return $text if defined $text;
 	my @text = qx(cscope -dL -9 $type);
 	if (@text) {
-		add_assignmet_to_perma_cache $type, \@text;
+		add_to_assignment_cache($type, \@text);
 		return \@text;
 	}
 	return undef;
@@ -500,6 +509,16 @@ sub add_struct_to_global_cache {
 	my ($type, $arr) = @_;
 	lock %global_struct_cache;
 	$global_struct_cache{"$type"} = $arr;
+}
+
+sub add_to_assignment_cache {
+	my ($type, $arr) = @_;
+	return unless defined $arr;
+	#verbose "${DBG_CACHE}CACHE: Written $#{$arr} lines to cache\n";
+
+	$local_assignment_cache{"$type"} = $arr;
+	#add_assignment_to_global_cache $type, $arr;
+	add_assignment_to_perma_cache $type, $arr;
 }
 
 sub add_to_struct_cache {
@@ -1455,8 +1474,8 @@ sub assess_mapped {
 			trace "REC: Recursing to callers: $def: $idx\n";
 			cscope_recurse $file, $def, $idx, $map_field;
 		} else {
-			trace "MISS_ASS Assignment: $def:$match:$fld\n";
 			if (defined $map_field) {
+				trace "MISS_ASS Assignment: $def:$match:$fld\n";
 				my $missing = get_assignment $map_field;
 				if (defined $missing and @{$missing}) {
 					my @missing = grep /$CURR_FILE/,@{$missing};
