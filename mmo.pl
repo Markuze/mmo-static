@@ -1432,8 +1432,11 @@ sub parse_file_line {
 	my $linear = extract_call_only $str, $CALLEE;
 
 	verbose "begin: $str: $linear\n";
-	if ($str =~ /^$CURR_FUNC\(|^[\w\s]+$CURR_FUNC\(*/) {
-		trace "DBG:CSCOPE_CALL:$str\n";
+	if ($str =~ /(\w+)\s+$CALLEE\(*/) {
+		unless ($1 eq "return" or $1 eq "else") {
+			trace "DBG:CSCOPE_CALL:$1:$str:\n";
+			return;
+		}
 	}
 
 	my @vars = split /,/, $linear;
