@@ -1479,7 +1479,7 @@ sub assess_mapped {
 				my $missing = get_assignment $map_field;
 				if (defined $missing and @{$missing}) {
 					my @missing = grep /$CURR_FILE/,@{$missing};
-					trace "MISS_ASS:[$#{$missing}:$#missing]$CURR_FILE:$CURR_FUNC\n";
+					trace "MISS_ASS:[$#{$missing}:$#missing:$#{$missing}]$CURR_FILE:$CURR_FUNC\n";
 					foreach (@missing) {
 						chomp;
 						my @line = split /\s+/, $_;
