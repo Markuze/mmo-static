@@ -409,6 +409,48 @@ sub extract_assignmet {
 	return ($rc, $stop);
 }
 
+sub get_assignment_from_perma_cache {
+	my $type = shift;
+	my $file = "$STRUCT_CACHE/Assignment/$type.txt";
+
+	return unless -e $file;
+
+	tie my @text, 'Tie::File', $file;
+	return undef if @text == 0;
+	verbose "PERMA: read $#{text} lines from $file\n";
+	return \@text;
+}
+
+sub add_assignmet_to_perma_cache {
+	my ($type, $arr) = @_;
+	my $file = "$STRUCT_CACHE/Assignment/$type.txt";
+
+	return unless defined $arr;
+	return unless defined $STRUCT_CACHE;
+	return if -e $file;
+
+	open my $fh, '>', $file;
+	foreach (@{$arr}) {
+		print $fh "$_\n";
+	}
+	close $fh;
+	verbose "${DBG_CACHE}PERMA: Written $#{$arr} lines to $file\n";
+}
+
+sub get_assignment {
+	my $type = shift;
+
+	my $text = get_assignment_from_perma_cache $type;
+
+	return $text if defined $text;
+	my @text = qx(cscope -dL -9 $type);
+	if (@text) {
+		add_assignmet_to_perma_cache $type, \@text;
+		return \@text;
+	}
+	return undef;
+}
+
 sub __get_struct_from_perma_cache {
 	my $type = shift;
 	my $file = "$STRUCT_CACHE/$type.txt";
@@ -1413,7 +1455,26 @@ sub assess_mapped {
 			trace "REC: Recursing to callers: $def: $idx\n";
 			cscope_recurse $file, $def, $idx, $map_field;
 		} else {
-			warning "MISSING Assignment: $def:$match:$fld\n";
+			trace "MISS_ASS Assignment: $def:$match:$fld\n";
+			if (defined $map_field) {
+				my $missing = get_assignment $map_field;
+				if (defined $missing and @{$missing}) {
+					my @missing = grep /$CURR_FILE/,@{$missing};
+					trace "MISS_ASS:[$#{$missing}:$#missing]$CURR_FILE:$CURR_FUNC\n";
+					foreach (@missing) {
+						chomp;
+						my @line = split /\s+/, $_;
+						my ($file, $func, $ln) = @line[0 .. 2];
+						@line = @line[ 3 .. $#line ];
+						my $line = join ' ', @line;
+						trace "MISS_ASS:$match:$line\n";
+					}
+				} else {
+					warning "MISS_ASS Assignment: $def:$match:$fld\n";
+				}
+			} else {
+				warning "MISS_ASS Assignment: $def:$match:$fld\n";
+			}
 		}
 	} else {
 			trace "STOP: mapped:$def:$match\n";
@@ -1551,6 +1612,7 @@ print ITALIC, CYAN, "Found $#cscope_lines files\n", RESET;
 my $nproc = `nproc`;
 qx(mkdir -p $LOGS_DIR);
 qx(mkdir -p $STRUCT_CACHE);
+qx(mkdir -p $STRUCT_CACHE/Assignment);
 
 prep_build_skb;
 
