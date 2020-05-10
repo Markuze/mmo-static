@@ -370,13 +370,13 @@ sub extract_assignmet {
 		my @type_C = grep(/$1/, @type_C_funcs);
 		$stop = 1;
 		if (@type_C) {
-			trace "VULNERABILITY: Type C Vulnerability: may expose shared_info\n";
+			trace "VULNERABILITY:Type C: may expose shared_info\n";
 		} elsif ($str =~ /(\w*alloc\w*)\s*\(|(\w*get\w*pages*)\s*\(/) {
 			panic "WTF?" unless (defined $1 or defined $2);
 			add_alloc_func defined $1 ? $1 : $2;
 			trace "SLUB: allocation $str\n";
 		} elsif ($str =~ /scsi_cmd_priv\s*\((.*)\)/) {
-			trace "VULNERABILITY: scsi_cmnd_priv: exposes scsi_cmnd: $str\n";
+			trace "VULNERABILITY:scsi_cmnd_priv: exposes scsi_cmnd: $str\n";
 			add_assignment_func 'scsi_cmnd_priv';
 			#TODO: Any point in tracing?
 		} elsif ($str =~ /current_buf\s*\((\w+)\)/) {
@@ -1667,9 +1667,12 @@ my @other = ();
 my $cnt = 0;
 my $err = 0;
 my $vul_cnt = 0;
+my $VUL_cnt = 0;
 my $skb_cnt = 0;
+
 foreach my $file (keys %cscope_lines) {
 	my $vul_found = 0;
+	my $VUL_found = 0;
 	my $skb_found = 0;
 	$cnt++;
 	foreach my $line (keys %{$cscope_lines{$file}}) {
@@ -1680,20 +1683,22 @@ foreach my $file (keys %cscope_lines) {
 		error "$file:$line\n" unless ($ref eq 'ARRAY');
 		$err++ unless ($ref eq 'ARRAY');
 
-		my @vul = grep(/VULNERABILITY/, @{$trace});
-		if (@vul) {
-			$vul_found++;
-		}
+		my @vul = grep(/Vulnerability/, @{$trace});
+		$vul_found++ if (@vul);
+
+		@vul = grep(/VULNERABILITY/, @{$trace});
+		$VUL_found++ if (@vul);
+
 		@vul = grep(/SKB:/, @{$trace});
-		if (@vul) {
-			$skb_found++;
-		}
+		$skb_found++ if (@vul);
+
 		while (@{$trace}) {
 			my $str = pop @{$trace};
 			print GREEN, $str ,RESET;
 		}
 	}
 	$vul_cnt++ if $vul_found > 0;
+	$VUL_cnt++ if $VUL_found > 0;
 	$skb_cnt++ if $skb_found > 0;
 ;
 }
@@ -1713,6 +1718,6 @@ dump_hash "ASSIGNMENT FUNCS", \%assignment_funcs;
 dump_hash "ALLOC FUNCS", \%alloc_funcs;
 
 print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET;
-print BOLD, BLUE, "Vulnerability found in $vul_cnt files\n" ,RESET;
+print BOLD, BLUE, "Vulnerability found in $vul_cnt + $VUL_cnt files\n" ,RESET;
 print BOLD, BLUE, "SKB Vulnerability found in $skb_cnt files\n" ,RESET;
 #start_parsing;
