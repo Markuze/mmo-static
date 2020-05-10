@@ -1251,6 +1251,7 @@ sub get_biggest_mapped {
 				($ok, $f_type) = handle_field $type, $field, $arr_entry;
 				return undef unless defined $ok;
 				$fld = $field;
+				$field = undef unless defined $f_type;
 			}
 			$f_type = $type unless defined $f_type;
 			verbose "Biggest: $str|$type|$match|$fld|$f_type\n";
@@ -1281,6 +1282,7 @@ sub get_biggest_mapped {
 				my $ok;
 				($ok, $f_type) = handle_field $type, $field, $arr_entry;
 				return undef unless defined $ok;
+				$field = undef unless defined $f_type;
 			}
 			$f_type = $type unless defined $f_type;
 			verbose "Biggest: $str|$type|$match|$fld|$f_type\n";
@@ -1376,6 +1378,7 @@ sub assess_mapped {
 	my $fld = 'NaN';
 	$fld = $map_field if defined $map_field;
 
+	$match =~ s/\)//;
 	verbose "ASSESSING: $CURR_FUNC:$line:$match:$fld\n";
 	if ($fld eq 'LocalRxBuffer') {
 		trace "SPECIAL CASE: $fld is a special case\n";
@@ -1486,7 +1489,14 @@ sub assess_mapped {
 						my ($file, $func, $ln) = @line[0 .. 2];
 						@line = @line[ 3 .. $#line ];
 						my $line = join ' ', @line;
-						trace "MISS_ASS:$match:$line\n";
+
+						my $var = $match;
+						$var =~ s/\)//;
+						if ($var ne $match) {
+							warning "DBG:MISS_ASS: $var =! $match\n";
+						}
+						my $str = ($line =~ /^\s*$var.*/) ? "G" : "B";
+						trace "MISS_ASS[$str]:$match:$line\n"
 					}
 				} else {
 					warning "MISS_ASS Assignment: $def:$match:$fld\n";
@@ -1559,6 +1569,7 @@ sub parse_file_line {
 	my $fld = 'NaN';
 	$fld = $field if defined $field;
 	trace "CALL [$CURR_FUNC:$line]: $str\n";
+	#$var =~ s/\)//;
 	verbose "Searching for: $var [$fld]\n";
 
 	#TODO: DO a better job at separating match/field - dont handle more than direct.
