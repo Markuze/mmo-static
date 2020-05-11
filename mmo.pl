@@ -1493,31 +1493,29 @@ sub assess_mapped {
 						my $var = $match;
 						$var =~ s/\)//;
 						if ($var ne $match) {
-							warning "DBG:MISS_ASS: $var =! $match\n";
+							verbose "DBG:MISS_ASS: $var =! $match\n";
 						}
 						my $str = "B";
 						if ($string =~ /^\s*$var.*/) {
 							$str = "G";
-							trace "MISS_ASS[$str]:$match:$string\n";
+							verbose "MISS_ASS[$str]:$match:$string\n";
 							my $string = linearize_assignment $file, $ln -1, $line;
-							trace "MISS_ASS[G]:$string\n";
+							verbose  "MISS_ASS[G]:$string\n";
 							my ($rc, $stop) = extract_assignmet $string;
 							$rc = "NaN" unless defined $rc;
-							trace "MISS_ASS[G]:$rc\n";
+							verbose "MISS_ASS[G]:$rc\n";
 							if (defined $rc) {
-								verbose "ASSIGNMENT:$rc|$stop\n";
+								verbose "MISS_ASS:ASSIGNMENT:$rc|$stop\n";
 								unless (exists ${$aliaces}{$rc}) {
 									${$aliaces}{$rc} = undef;
-									trace "ASSIGNMENT: Recurse on assignment: $_ ($rc)\n" if defined $rc;
+									trace "MISS_ASS:ASSIGNMENT: Recurse on assignment: $_ ($rc)\n" if defined $rc;
 									inc_def_depth;
 									assess_mapped($file, $line -1, $rc, undef, $aliaces);
 									$CURR_DEF_DEPTH--;
 								} else {
 									trace "DBG: Endless Looop: $_ ($rc)\n" if defined $rc;
 								}
-		} else {
-			verbose "NaN|$stop\n";
-		}
+							}
 
 						} else {
 							trace "MISS_ASS[$str]:$match:$string\n";
