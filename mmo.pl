@@ -1496,9 +1496,11 @@ sub assess_mapped {
 							verbose "DBG:MISS_ASS: $var =! $match\n";
 						}
 						my $str = "B";
-						if ($string =~ /^\s*$var.*/) {
+						if ($string =~ /^\s*$var\s*=/) {
 							$str = "G";
 							verbose "MISS_ASS[$str]:$match:$string\n";
+							next if ($string =~ /^\s*$var\s*==/);
+
 							my $string = linearize_assignment $file, $ln -1, $line;
 							verbose  "MISS_ASS[G]:$string\n";
 							my ($rc, $stop) = extract_assignmet $string;
@@ -1507,10 +1509,13 @@ sub assess_mapped {
 							if (defined $rc) {
 								verbose "MISS_ASS:ASSIGNMENT:$rc|$stop\n";
 								unless (exists ${$aliaces}{$rc}) {
+									my $cfunc = $CURR_FUNC;
 									${$aliaces}{$rc} = undef;
 									trace "MISS_ASS:ASSIGNMENT: Recurse on assignment: $_ ($rc)\n" if defined $rc;
 									inc_def_depth;
-									assess_mapped($file, $line -1, $rc, undef, $aliaces);
+									$CURR_FUNC = $func;
+									assess_mapped($file, $ln -1, $rc, undef, $aliaces);
+									$CURR_FUNC = $cfunc;
 									$CURR_DEF_DEPTH--;
 								} else {
 									trace "DBG: Endless Looop: $_ ($rc)\n" if defined $rc;
