@@ -1001,7 +1001,7 @@ sub linearize_assignment {
 
 	until  (${$file}[$line] =~ /;/) {
 		$line++;
-		panic ("END OF FILE: $$file[$line] ($line)\n") if $line > $#{$file};
+		panic ("END OF FILE: ${$file}[$line] ($line)\n") if $line > $#{$file};
 		my $tmp =${$file}[$line];
 		$tmp =~ s/^\s+//;
 		$str.= " $tmp";
@@ -1486,17 +1486,42 @@ sub assess_mapped {
 					foreach (@missing) {
 						chomp;
 						my @line = split /\s+/, $_;
-						my ($file, $func, $ln) = @line[0 .. 2];
+						my ($fl, $func, $ln) = @line[0 .. 2];
 						@line = @line[ 3 .. $#line ];
-						my $line = join ' ', @line;
+						my $string = join ' ', @line;
 
 						my $var = $match;
 						$var =~ s/\)//;
 						if ($var ne $match) {
 							warning "DBG:MISS_ASS: $var =! $match\n";
 						}
-						my $str = ($line =~ /^\s*$var.*/) ? "G" : "B";
-						trace "MISS_ASS[$str]:$match:$line\n"
+						my $str = "B";
+						if ($string =~ /^\s*$var.*/) {
+							$str = "G";
+							trace "MISS_ASS[$str]:$match:$string\n";
+							my $string = linearize_assignment $file, $ln -1, $line;
+							trace "MISS_ASS[G]:$string\n";
+							my ($rc, $stop) = extract_assignmet $string;
+							$rc = "NaN" unless defined $rc;
+							trace "MISS_ASS[G]:$rc\n";
+							if (defined $rc) {
+								verbose "ASSIGNMENT:$rc|$stop\n";
+								unless (exists ${$aliaces}{$rc}) {
+									${$aliaces}{$rc} = undef;
+									trace "ASSIGNMENT: Recurse on assignment: $_ ($rc)\n" if defined $rc;
+									inc_def_depth;
+									assess_mapped($file, $line -1, $rc, undef, $aliaces);
+									$CURR_DEF_DEPTH--;
+								} else {
+									trace "DBG: Endless Looop: $_ ($rc)\n" if defined $rc;
+								}
+		} else {
+			verbose "NaN|$stop\n";
+		}
+
+						} else {
+							trace "MISS_ASS[$str]:$match:$string\n";
+						}
 					}
 				} else {
 					warning "MISS_ASS Assignment: $def:$match:$fld\n";
