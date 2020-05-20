@@ -30,7 +30,14 @@ my $TRY_CONFIG = undef;
 my $FH;
 my $TID;
 
-my @type_C_funcs = qw(page_frag_alloc netdev_alloc_frag napi_alloc_frag); #TODO: recurse and collect callers untill all are exported.
+my @type_C_funcs = qw(page_frag_alloc
+			netdev_alloc_frag napi_alloc_frag
+			__netdev_alloc_frag __napi_alloc_frag
+			netdev_alloc_skb napi_alloc_skb
+			__netdev_alloc_skb __napi_alloc_skb
+			napi_get_frags
+			); #TODO: recurse and collect callers untill all are exported.
+
 my %cscope_lines : shared = ();
 my @cscope_lines : shared = ();
 my %exported_symbols : shared = ();
@@ -370,7 +377,7 @@ sub extract_assignmet {
 		my @type_C = grep(/$1/, @type_C_funcs);
 		$stop = 1;
 		if (@type_C) {
-			trace "VULNERABILITY:Type C: may expose shared_info\n";
+			trace "Type C: may expose shared_info\n";
 		} elsif ($str =~ /(\w*alloc\w*)\s*\(|(\w*get\w*pages*)\s*\(/) {
 			panic "WTF?" unless (defined $1 or defined $2);
 			add_alloc_func defined $1 ? $1 : $2;
@@ -723,6 +730,29 @@ sub read_struct {
 	return $out;
 }
 
+sub get_type_C {
+	my %files = ();
+	my $total = 0;
+	my $files = 0;
+
+	print ITALIC, CYAN, "type_C callers\n", RESET;
+
+	foreach (@type_C_funcs) {
+		my @calls = qx(cscope -dL -3 $_);
+		foreach my $call (@calls) {
+			my ($file, $func, @other) = split /\s+/, $call;
+			#print RED, "$file:$func\n", RESET;
+			next if grep(/$func/,@type_C_funcs);
+			$total++;
+			next if exists $files{$file};
+			$files{$file} = undef;
+			$files++;
+		}
+	}
+	print CYAN, "type_C: [$files, $total]\n", RESET;
+
+}
+
 sub prep_build_skb {
 	my @callers = qx(cscope -dL -3 build_skb);
 	my $i = 0;
@@ -732,18 +762,6 @@ sub prep_build_skb {
 	foreach (@callers) {
 		$i++;
 		print CYAN, "BUILD_SKB: $i) $_", RESET;
-	}
-}
-
-sub prep_type_c {
-	my $func = shift;
-
-	$func = 'page_frag_alloc' unless defined $func;
-	my @callers = qx(cscope -dL -3 $func);
-
-	print ITALIC, CYAN, "Callers\n", RESET;
-	foreach (@callers) {
-		print CYAN, "$_", RESET;
 	}
 }
 
@@ -1672,8 +1690,6 @@ qx(mkdir -p $LOGS_DIR);
 qx(mkdir -p $STRUCT_CACHE);
 qx(mkdir -p $STRUCT_CACHE/Assignment);
 
-prep_build_skb;
-
 my @threads;
 
 print ITALIC, CYAN, "Spawning threads\n", RESET;
@@ -1697,6 +1713,9 @@ my $err = 0;
 my $vul_cnt = 0;
 my $VUL_cnt = 0;
 my $skb_cnt = 0;
+my $vul_tot_cnt = 0;
+my $VUL_tot_cnt = 0;
+my $skb_tot_cnt = 0;
 
 foreach my $file (keys %cscope_lines) {
 	my $vul_found = 0;
@@ -1712,13 +1731,13 @@ foreach my $file (keys %cscope_lines) {
 		$err++ unless ($ref eq 'ARRAY');
 
 		my @vul = grep(/Vulnerability/, @{$trace});
-		$vul_found++ if (@vul);
+		$vul_found+=@vul if (@vul);
 
 		@vul = grep(/VULNERABILITY/, @{$trace});
-		$VUL_found++ if (@vul);
+		$VUL_found+=@vul if (@vul);
 
 		@vul = grep(/SKB:/, @{$trace});
-		$skb_found++ if (@vul);
+		$skb_found+=@vul if (@vul);
 
 		while (@{$trace}) {
 			my $str = pop @{$trace};
@@ -1728,6 +1747,9 @@ foreach my $file (keys %cscope_lines) {
 	$vul_cnt++ if $vul_found > 0;
 	$VUL_cnt++ if $VUL_found > 0;
 	$skb_cnt++ if $skb_found > 0;
+	$vul_tot_cnt += $vul_found;
+	$VUL_tot_cnt += $VUL_found;
+	$skb_tot_cnt += $skb_found;
 ;
 }
 
@@ -1745,7 +1767,12 @@ sub dump_hash {
 dump_hash "ASSIGNMENT FUNCS", \%assignment_funcs;
 dump_hash "ALLOC FUNCS", \%alloc_funcs;
 
-print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET;
+prep_build_skb;
+get_type_C;
+
+print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET
 print BOLD, BLUE, "Vulnerability found in $vul_cnt + $VUL_cnt files\n" ,RESET;
+print BOLD, BLUE, "Vulnerability found in $vul_tot_cnt + $VUL_tot_cnt instances\n" ,RESET;
 print BOLD, BLUE, "SKB Vulnerability found in $skb_cnt files\n" ,RESET;
-#start_parsing;
+print BOLD, BLUE, "SKB Vulnerability found in $skb_tot_cnt instances\n" ,RESET;
+##start_parsing;
