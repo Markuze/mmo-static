@@ -1,17 +1,30 @@
 #!/bin/bash
 
-sudo apt-get update
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential libncurses5-dev gcc make git bc libssl-dev libelf-dev libreadline-dev binutils-dev libnl-genl-3-dev make trace-cmd
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y flex bison
+work_dir=~/dev/mmo/
+function ex {
+	echo "$@";
+	$@  > /tmp/log.txt
+}
 
-cd ~/ubuntu-bionic
-pwd
+ex sudo apt-get update
+ex sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential libncurses5-dev gcc make git bc libssl-dev libelf-dev libreadline-dev binutils-dev libnl-genl-3-dev make trace-cmd
+ex sudo DEBIAN_FRONTEND=noninteractive apt-get install -y flex bison cscope dwarves
+
+dir=`pwd`
+ex rm -rf $work_dir
+ex mkdir -p $work_dir
+ex cd $work_dir
+
+ex git clone https://github.com/torvalds/linux.git --depth=1
+
+ex cd ./linux
 echo "Config will all yes and debug info"
-make allmodconfig
-./scripts/config -d COMPILE_TEST -e DEBUG_KERNEL -e DEBUG_INFO
-make olddefconfig
+ex make allmodconfig
+ex ./scripts/config -d COMPILE_TEST -e DEBUG_KERNEL -e DEBUG_INFO
+ex make olddefconfig
 
 echo "Compiling, this may take some time..."
-time make -j `nproc` > /dev/null
+ex time make -j `nproc` > /dev/null &
 echo "creating cscope_db"
-time ~/mmo-static/cscope.sh
+ex time $dir/cscope.sh
+wait

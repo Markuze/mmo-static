@@ -13,17 +13,19 @@ use Term::ANSIColor;
 use Term::ANSIColor qw(:constants);
 use File::Basename;
 use File::Spec::Functions;
+use File::Glob;
 
 use Cwd;
 
 ##################### GLOBALS ##########################
+my $BASE = "~/dev/mmo/";
 my $RECURSION_DEPTH_LIMIT = 6; #was once 6
 my $RECURSION_DEF_DEPTH_LIMIT = 6;
 my $MAX_STACK_SIZE = 512;
 my $LOGS_DIR = '/tmp/logs';
-my $STRUCT_CACHE = '/home/xlr8vgn/struct_cache';
-my $KERNEL_DIR = '/home/xlr8vgn/ubuntu-bionic';
-my $VMLINUX;# = '/home/xlr8vgn/ubuntu-bionic/vmlinux';
+my $STRUCT_CACHE = "$BASE/struct_cache";
+my $KERNEL_DIR = "$BASE/linux";
+my $VMLINUX = "$KERNEL_DIR/vmlinux";
 my @ROOT_FUNCS = qw( dma_map_single pci_map_single );
 my $verbose = undef;
 my $TRY_CONFIG = undef;
@@ -71,10 +73,10 @@ my @BASE_TYPES = qw(void char long int u8 u16 u32 u64 __be64
 			__le64 assoc_array_ptr uchar u_char);
 my %opts = ();
 my $argv = "@ARGV";
-getopts('vk:cx', \%opts);
+getopts('vk:c', \%opts);
 
 $KERNEL_DIR = $opts{'k'} if defined $opts{'k'};
-$VMLINUX = "$KERNEL_DIR/vmlinux" if defined $opts{'x'};
+$VMLINUX = "$KERNEL_DIR/vmlinux" if defined $opts{'k'};
 
 $verbose = 1 if defined $opts{'v'};
 $TRY_CONFIG = 1 if defined $opts{'c'};
@@ -88,6 +90,13 @@ use constant {
 ##################### LEMA ########################
 sub usage {
         die "bad command: $0 $argv\nusage: $0\n";
+}
+
+sub fixup_globals {
+	$BASE =~ s/~/$ENV{'HOME'}/;
+	$STRUCT_CACHE = "$BASE/struct_cache";
+	$KERNEL_DIR = "$BASE/linux";
+	$VMLINUX = "$KERNEL_DIR/vmlinux";
 }
 
 sub new_verbose {
@@ -1657,8 +1666,10 @@ sub start_parsing {
 }
 #################### MAIN #########################3
 my $dir = dirname $0;
+printf "$0 [$dir][$KERNEL_DIR]$ENV{'HOME'}\n";
 $dir = File::Spec->rel2abs($dir);
-printf "$0 [$dir]\n";
+fixup_globals();
+printf "$0 [$dir][$KERNEL_DIR]\n";
 
 chdir $KERNEL_DIR;
 
