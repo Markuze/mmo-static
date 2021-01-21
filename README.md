@@ -25,6 +25,9 @@ SPADE is a static code analysis tool for identifing sub-page DMA vulnerabilites.
 
 1. mmo.pl: performs a static analysis for the kernel in the working directory.
 1. Read output: less -LR /tmp/logs/*.txt
+	1. For Vulnerabilities > grep -in Vulnerability /tmp/logs/*
+	1. For shared_info issues >
+		grep -n SKB /tmp/logs/*
 
 ### Perl 5 modules:
 mmo.pl is a perl 5 script which uses some eixting perl libraries. In case of missing library erros please install from [CPAN](https://cpan.metacpan.org/modules/INSTALL.html).
