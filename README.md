@@ -25,10 +25,31 @@ SPADE is a static code analysis tool for identifing sub-page DMA vulnerabilites.
 
 1. mmo.pl: performs a static analysis for the kernel in the working directory.
 1. Read output: less -LR /tmp/logs/*.txt
-	1. For Vulnerabilities 
+	1. For DMA Vulnerabilities
 		> grep -in Vulnerability /tmp/logs/*
-	1. For shared_info issues 
+	1. For DMA vulnerabilities due to struct skb_shared_info:
 		> grep -n SKB /tmp/logs/*
+1. At the end of the analysis mmo.pl shows the following
+	- Number of files that were checked
+	- Number of DMA vulnerabilities found
+	- Number of DMA vulnerabilities due to struct skb_shared_info found:
+1. The detailed output is in the /tmp/log/\* files. There is a log file per thread.
+
+## Example:
+Found in /tmp/logs/\*
+```
+/*** Spoofed Vulnerability:*/ |931| Callbacks reachable via struct nvme_fc_fcp_op : DMA_FROM_DEVICE
+/*** Direct Vulnerability: */ |1 |  Callback exposed in    struct nvme_fc_fcp_op : DMA_FROM_DEVICE
+/*mapped type:*/ struct nvme_fc_fcp_op
+/*DECLARATION*/["__nvme_fc_init_request:1698"]:__nvme_fc_init_request(struct nvme_fc_ctrl *ctrl,
+                                                             struct nvme_fc_queue *queue, struct nvme_fc_fcp_op *op, ...)
+/*CALL*/["__nvme_fc_init_request:1731"]: fc_dma_map_single(ctrl->lport->dev, &op->rsp_iu,
+                                                     sizeof(op->rsp_iu), DMA_FROM_DEVICE);
+/*mapped type:*/ void
+/*DECLARATION*/["fc_dma_map_single:935"]:fc_dma_map_single(struct device *dev, void *ptr, ...) {
+/*CALL*/["fc_dma_map_single:939"]: return dev ? dma_map_single(dev, ptr, size, dir) : (dma_addr_t)0L;
+
+```
 
 ### Perl 5 modules:
 mmo.pl is a perl 5 script which uses some eixting perl libraries. In case of missing library erros please install from [CPAN](https://cpan.metacpan.org/modules/INSTALL.html).
