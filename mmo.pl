@@ -404,11 +404,11 @@ sub extract_assignmet {
 			add_assignment_func $2;
 			return ($2,1);
 		} elsif ($str =~ /PTR_ALIGN\s*\((.*),.*\)/) {
-			trace "PTR_ALIGN: $1 |$verbose\n";
+			trace "PTR_ALIGN: $1\n";
 			($str, $stop) = extract_and_check_var $1;
 			return $str, $stop;
 		} elsif ($str =~ /PAGE_ALIGN\s*\((.*)\)/) {
-			trace "PAGE_ALIGN: $1 |$verbose\n";
+			trace "PAGE_ALIGN: $1\n";
 			($str, $stop) = extract_and_check_var $1;
 			return $str, $stop;
 		} else {
@@ -1781,9 +1781,12 @@ dump_hash "ALLOC FUNCS", \%alloc_funcs;
 prep_build_skb;
 get_type_C;
 
-print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET
-print BOLD, BLUE, "Vulnerability found in $vul_cnt + $VUL_cnt files\n" ,RESET;
-print BOLD, BLUE, "Vulnerability found in $vul_tot_cnt + $VUL_tot_cnt instances\n" ,RESET;
+$vul_cnt += $VUL_cnt;
+$vul_tot_cnt +=$VUL_tot_cnt;
+
+print BOLD, BLUE, "Parsed $cnt Files ($err)[$CURR_DEPTH_MAX:$CURR_DEF_DEPTH_MAX]\n" ,RESET;
+print BOLD, BLUE, "Vulnerability found in $vul_cnt files\n" ,RESET;
+print BOLD, BLUE, "Vulnerability found in $vul_tot_cnt instances\n" ,RESET;
 print BOLD, BLUE, "SKB Vulnerability found in $skb_cnt files\n" ,RESET;
 print BOLD, BLUE, "SKB Vulnerability found in $skb_tot_cnt instances\n" ,RESET;
 ##start_parsing;
