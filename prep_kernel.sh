@@ -1,6 +1,7 @@
 #!/bin/bash
 
 work_dir=~/dev/mmo/
+
 function ex {
 	echo "$@";
 	$@  > /tmp/log.txt
@@ -15,7 +16,8 @@ ex rm -rf $work_dir
 ex mkdir -p $work_dir
 ex cd $work_dir
 
-ex git clone https://github.com/torvalds/linux.git --depth=1
+#ex git clone https://github.com/torvalds/linux.git --depth=1
+ex git clone git://kernel.ubuntu.com/ubuntu/ubuntu-bionic.git --depth=1 --branch v5.4 linux
 
 ex cd ./linux
 echo "Config will all yes and debug info"
